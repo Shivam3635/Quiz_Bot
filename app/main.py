@@ -1,7 +1,8 @@
-"""Main entry point for BulkQuiz Telegram Bot."""
-
+import os
 import sys
+import threading
 import warnings
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram.warnings import PTBUserWarning
 
 warnings.filterwarnings("ignore", category=PTBUserWarning)
@@ -291,10 +292,44 @@ def create_bot_app() -> Application:
     return application
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler to satisfy Render/cloud health checks."""
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"OK - BulkQuiz Bot is active and healthy")
+
+    def do_HEAD(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        # Suppress routine health check request logs to keep terminal logs clean
+        pass
+
+
+def start_health_check_server(port: int) -> None:
+    """Start the lightweight health-check server in a background daemon thread."""
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        logger.info("Health-check server running on port %d for cloud hosting.", port)
+        server.serve_forever()
+    except Exception as e:
+        logger.warning("Could not bind health-check server on port %d: %s", port, e)
+
+
 def main() -> None:
     """Run the BulkQuiz bot."""
     settings = get_settings()
     logger.info("Starting BulkQuiz Bot in %s mode...", settings.ENVIRONMENT)
+
+    # Start health-check server if PORT is provided by hosting environment (Render, etc.)
+    port_env = os.environ.get("PORT")
+    if port_env and port_env.isdigit():
+        t = threading.Thread(target=start_health_check_server, args=(int(port_env),), daemon=True)
+        t.start()
 
     if (
         not settings.TELEGRAM_BOT_TOKEN
