@@ -467,18 +467,31 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
 
     user = update.effective_user
     user_id = user.id if user else 0
-    with SessionLocal() as db:
-        user_rec = get_or_create_user(db, telegram_id=user_id, username=user.username if user else None)
-        quiz_set = save_quiz_batch(
-            db=db,
-            user_id=user_rec.id,
-            title=settings.title,
-            description=settings.description,
-            questions=questions,
-            settings=settings,
-        )
-        saved_quiz_set_id = quiz_set.id
-        context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
+    saved_quiz_set_id = None
+    try:
+        with SessionLocal() as db:
+            user_rec = get_or_create_user(db, telegram_id=user_id, username=user.username if user else None)
+            quiz_set = save_quiz_batch(
+                db=db,
+                user_id=user_rec.id,
+                title=settings.title,
+                description=settings.description,
+                questions=questions,
+                settings=settings,
+            )
+            saved_quiz_set_id = quiz_set.id
+            context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
+            logger.info("Successfully persisted quiz set %d for user %d", saved_quiz_set_id, user_id)
+    except Exception as db_err:
+        logger.exception("Failed to save quiz batch for user %s: %s", user_id, db_err)
+        session.status = "WAITING_FOR_INPUT"
+        if status_msg:
+            await status_msg.edit_text(
+                "❌ <b>Database Error</b>\n\n"
+                "An unexpected database error occurred while saving your quiz. Please try sending /done again or /newquiz to start fresh.",
+                parse_mode=ParseMode.HTML,
+            )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
 
     from app.bot.keyboards.settings import get_quiz_settings_config_keyboard
     from app.bot.handlers.settings import format_quiz_settings_text
