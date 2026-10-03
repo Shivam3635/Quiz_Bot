@@ -70,17 +70,26 @@ def get_validation_error_keyboard(
     first_invalid_idx: int,
     total_valid: int,
     total_invalid: int,
+    has_oversized: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Return options when questions fail validation, enabling in-place fixing."""
-    rows = [
+    """Return options when questions fail validation, enabling in-place fixing and auto-shortening."""
+    rows = []
+    if has_oversized:
+        rows.append(
+            [
+                InlineKeyboardButton("✨ Auto Shorten Options", callback_data="auto_shorten_options"),
+            ]
+        )
+
+    rows.append(
         [
             InlineKeyboardButton(
                 f"🛠️ Fix Question {first_invalid_idx} Directly",
                 callback_data=f"fix_invalid_q_{first_invalid_idx - 1}",
             ),
             InlineKeyboardButton("👀 Review All (Preview)", callback_data="goto_preview"),
-        ],
-    ]
+        ]
+    )
 
     if total_valid > 0:
         rows.append(
@@ -100,4 +109,29 @@ def get_validation_error_keyboard(
     )
 
     return InlineKeyboardMarkup(rows)
+
+
+def get_shortened_option_review_keyboard(
+    q_idx: int,
+    opt_idx: int,
+    can_keep_original: bool = False,
+    remaining_count: int = 1,
+) -> InlineKeyboardMarkup:
+    """Return controls for reviewing a proposed shortened option."""
+    row1 = [InlineKeyboardButton("✅ Accept", callback_data=f"accept_shortened_{q_idx}_{opt_idx}")]
+    if remaining_count > 1:
+        row1.append(InlineKeyboardButton(f"✅ Accept All ({remaining_count})", callback_data="accept_all_shortened"))
+
+    row2 = [InlineKeyboardButton("✏️ Edit Manually", callback_data=f"edit_shortened_{q_idx}_{opt_idx}")]
+    if can_keep_original:
+        row2.append(InlineKeyboardButton("↩️ Keep Original", callback_data=f"keep_orig_shortened_{q_idx}_{opt_idx}"))
+
+    return InlineKeyboardMarkup(
+        [
+            row1,
+            row2,
+            [InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")],
+        ]
+    )
+
 

@@ -6,6 +6,7 @@ from telegram.constants import ParseMode, PollType
 from telegram.error import TelegramError
 
 from app.parser.models import QuizQuestion, QuizSettings
+from app.parser.validator import validate_option_length
 from app.utils.helpers import (
     format_bilingual_question_text,
     format_rich_text_for_telegram,
@@ -53,6 +54,23 @@ class TelegramService:
         settings: QuizSettings,
     ) -> bool:
         """Publish a single native Telegram Quiz Poll with rich text formatting."""
+        # Layer 2: Final pre-send validation immediately before Telegram API call
+        for opt_idx, opt in enumerate(question.options):
+            opt_letter = chr(ord("A") + opt_idx)
+            val_res = validate_option_length(opt)
+            if not val_res.valid:
+                logger.error(
+                    "OPTION_LENGTH_VALIDATION question=%s option=%s length=%d limit=%d status=overflow",
+                    question.question_number or "?",
+                    opt_letter,
+                    val_res.length,
+                    val_res.limit,
+                )
+                raise ValueError(
+                    f"Pre-send validation failed: Question {question.question_number or '?'} Option {opt_letter} "
+                    f"has {val_res.length} characters (Telegram limit is {val_res.limit})."
+                )
+
         options = question.options
         if settings.shuffle_options:
             # Note: If shuffling options, correct_option must be updated accordingly

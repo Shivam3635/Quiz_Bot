@@ -8,6 +8,12 @@ from app.services.publishing_service import (
     render_progress_bar,
 )
 from app.services.quiz_service import QuizService, ProcessBatchResult
+from app.services.ai_service import (
+    OptionShortenerService,
+    ShortenResult,
+    BatchShortenResult,
+    shortener_service,
+)
 
 __all__ = [
     "TelegramService",
@@ -17,4 +23,9 @@ __all__ = [
     "render_progress_bar",
     "QuizService",
     "ProcessBatchResult",
+    "OptionShortenerService",
+    "ShortenResult",
+    "BatchShortenResult",
+    "shortener_service",
 ]
+

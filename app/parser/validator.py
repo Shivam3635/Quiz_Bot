@@ -2,17 +2,67 @@
 
 from dataclasses import dataclass, field
 from typing import Optional
+from app.config.settings import (
+    TELEGRAM_OPTION_MAX_LENGTH,
+    TELEGRAM_QUESTION_MAX_LENGTH,
+    TELEGRAM_EXPLANATION_MAX_LENGTH,
+)
 from app.parser.models import QuizQuestion
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 # Telegram Poll API constraints
-TELEGRAM_MAX_QUESTION_LENGTH = 300
-TELEGRAM_MAX_OPTION_LENGTH = 100
-TELEGRAM_MAX_EXPLANATION_LENGTH = 200
+TELEGRAM_MAX_QUESTION_LENGTH = TELEGRAM_QUESTION_MAX_LENGTH
+TELEGRAM_MAX_OPTION_LENGTH = TELEGRAM_OPTION_MAX_LENGTH
+TELEGRAM_MAX_EXPLANATION_LENGTH = TELEGRAM_EXPLANATION_MAX_LENGTH
 TELEGRAM_MIN_OPTIONS = 2
 TELEGRAM_MAX_OPTIONS = 10
+
+
+@dataclass
+class OptionLengthResult:
+    """Detailed character-length measurement of a quiz option against Telegram constraints."""
+
+    valid: bool
+    length: int
+    limit: int
+    excess: int
+    option_text: str
+
+    def to_dict(self) -> dict:
+        """Return dict representation as specified in design requirements."""
+        return {
+            "valid": self.valid,
+            "length": self.length,
+            "limit": self.limit,
+            "excess": self.excess,
+        }
+
+    def __getitem__(self, item: str):
+        return self.to_dict()[item]
+
+
+def validate_option_length(
+    option_text: str,
+    limit: int = TELEGRAM_OPTION_MAX_LENGTH,
+) -> OptionLengthResult:
+    """
+    Validate a single quiz option against Telegram's character limit.
+    Treats limit as Unicode character count (not word or byte count).
+    Supports Hindi/Devanagari, English, punctuation, emojis, parentheses, etc.
+    """
+    cleaned = option_text.strip()
+    length = len(cleaned)
+    excess = max(0, length - limit)
+    is_valid = 0 < length <= limit
+    return OptionLengthResult(
+        valid=is_valid,
+        length=length,
+        limit=limit,
+        excess=excess,
+        option_text=cleaned,
+    )
 
 
 @dataclass
@@ -22,6 +72,11 @@ class QuestionValidationError:
     question_index: int
     rule: str
     message: str
+    option_index: Optional[int] = None
+    option_letter: Optional[str] = None
+    length: Optional[int] = None
+    limit: Optional[int] = None
+    excess: Optional[int] = None
 
 
 @dataclass
@@ -51,6 +106,27 @@ class ValidationResult:
     def failed_question_indices(self) -> list[int]:
         """Return sorted 1-based indices of questions that have errors."""
         return sorted(list(set(e.question_index for e in self.errors)))
+
+    @property
+    def has_oversized_options(self) -> bool:
+        """Return True if any options exceeded Telegram's 100-character limit."""
+        return any(e.rule == "OPTION_TOO_LONG" for e in self.errors)
+
+    @property
+    def oversized_option_errors(self) -> list[QuestionValidationError]:
+        """Return list of errors specifically regarding oversized options."""
+        return [e for e in self.errors if e.rule == "OPTION_TOO_LONG"]
+
+    def format_oversized_options_summary(self) -> str:
+        """Format clean list of oversized options for Telegram UI."""
+        lines = []
+        for err in self.oversized_option_errors:
+            q_num = err.question_index
+            opt_letter = err.option_letter or (chr(ord("A") + err.option_index) if err.option_index is not None else "?")
+            length = err.length if err.length is not None else "?"
+            limit = err.limit if err.limit is not None else TELEGRAM_OPTION_MAX_LENGTH
+            lines.append(f"• <b>Q{q_num} → Option {opt_letter}:</b> <code>{length}/{limit}</code>")
+        return "\n".join(lines)
 
     def get_formatted_error_report(self, max_display: int = 5, custom_footer: Optional[str] = None) -> str:
         """Generate a user-friendly error summary suitable for Telegram display."""
@@ -139,35 +215,71 @@ class QuizValidator:
         # 3. Individual option validation & duplicate detection
         seen_options: set[str] = set()
         for opt_idx, opt in enumerate(q.options):
-            stripped_opt = opt.strip()
-            if not stripped_opt:
+            opt_letter = chr(ord("A") + opt_idx)
+            opt_res = validate_option_length(opt, limit=TELEGRAM_OPTION_MAX_LENGTH)
+
+            if opt_res.length == 0:
+                logger.warning(
+                    "OPTION_LENGTH_VALIDATION question=%s option=%s length=0 limit=%d status=empty",
+                    index,
+                    opt_letter,
+                    opt_res.limit,
+                )
                 errors.append(
                     QuestionValidationError(
                         question_index=index,
                         rule="EMPTY_OPTION",
-                        message=f"Option {opt_idx + 1} is empty.",
+                        message=f"Option {opt_letter} ({opt_idx + 1}) is empty.",
+                        option_index=opt_idx,
+                        option_letter=opt_letter,
+                        length=0,
+                        limit=opt_res.limit,
+                        excess=0,
                     )
                 )
-            elif len(stripped_opt) > TELEGRAM_MAX_OPTION_LENGTH:
+            elif not opt_res.valid:
+                logger.warning(
+                    "OPTION_LENGTH_VALIDATION question=%s option=%s length=%d limit=%d excess=%d status=overflow",
+                    index,
+                    opt_letter,
+                    opt_res.length,
+                    opt_res.limit,
+                    opt_res.excess,
+                )
                 errors.append(
                     QuestionValidationError(
                         question_index=index,
                         rule="OPTION_TOO_LONG",
                         message=(
-                            f"Option {opt_idx + 1} is {len(stripped_opt)} characters "
-                            f"(limit: {TELEGRAM_MAX_OPTION_LENGTH})."
+                            f"Option {opt_letter} is {opt_res.length} characters "
+                            f"(limit: {opt_res.limit}, exceeds by {opt_res.excess})."
                         ),
+                        option_index=opt_idx,
+                        option_letter=opt_letter,
+                        length=opt_res.length,
+                        limit=opt_res.limit,
+                        excess=opt_res.excess,
                     )
+                )
+            else:
+                logger.debug(
+                    "OPTION_LENGTH_VALIDATION question=%s option=%s length=%d limit=%d status=valid",
+                    index,
+                    opt_letter,
+                    opt_res.length,
+                    opt_res.limit,
                 )
 
             # Check for duplicate options (case-insensitive)
-            normalized_opt = stripped_opt.lower()
+            normalized_opt = opt_res.option_text.lower()
             if normalized_opt in seen_options:
                 errors.append(
                     QuestionValidationError(
                         question_index=index,
                         rule="DUPLICATE_OPTION",
-                        message=f"Duplicate option detected: \"{stripped_opt}\". Options must be distinct.",
+                        message=f"Duplicate option detected: \"{opt_res.option_text}\". Options must be distinct.",
+                        option_index=opt_idx,
+                        option_letter=opt_letter,
                     )
                 )
             seen_options.add(normalized_opt)

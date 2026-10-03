@@ -12,6 +12,7 @@ from telegram.constants import ParseMode, PollType
 from app.database.database import SessionLocal
 from app.database.repositories import record_battle_result
 from app.parser.models import QuizQuestion
+from app.parser.validator import validate_option_length
 from app.utils.helpers import format_bilingual_question_text, format_rich_text_for_telegram
 from app.utils.logger import setup_logger
 
@@ -288,6 +289,24 @@ async def run_game_loop(bot: Bot, game: GameSession) -> None:
                 if question.explanation
                 else None
             )
+
+            # Pre-send validation before poll creation
+            for opt_idx, opt in enumerate(question.options):
+                opt_letter = chr(ord("A") + opt_idx)
+                val_res = validate_option_length(opt)
+                if not val_res.valid:
+                    logger.error(
+                        "OPTION_LENGTH_VALIDATION game_chat=%s question=%d option=%s length=%d limit=%d status=overflow",
+                        chat_id,
+                        q_idx + 1,
+                        opt_letter,
+                        val_res.length,
+                        val_res.limit,
+                    )
+                    raise ValueError(
+                        f"Game question {q_idx + 1} Option {opt_letter} exceeds Telegram 100-char limit "
+                        f"({val_res.length}/{val_res.limit})"
+                    )
 
             # Send native Quiz Poll (is_anonymous=False is required for Telegram to dispatch poll_answer)
             poll_msg = await bot.send_poll(
