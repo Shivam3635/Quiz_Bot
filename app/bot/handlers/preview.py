@@ -15,6 +15,7 @@ from app.parser.parser import BulkQuizParser
 from app.parser.validator import (
     QuizValidator,
     TELEGRAM_MAX_EXPLANATION_LENGTH,
+    TELEGRAM_MAX_EXTENDED_OPTION_LENGTH,
     TELEGRAM_MAX_OPTION_LENGTH,
     TELEGRAM_MAX_QUESTION_LENGTH,
 )
@@ -28,7 +29,7 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 parser = BulkQuizParser()
-validator = QuizValidator()
+validator = QuizValidator(allow_extended_options=True)
 
 
 def format_question_preview(q: QuizQuestion, index: int, total: int, settings: QuizSettings) -> str:
@@ -45,17 +46,19 @@ def format_question_preview(q: QuizQuestion, index: int, total: int, settings: Q
         for err in val_errors:
             lines.append(f"• <i>{err.message}</i>")
         lines.append("")
+    elif any(len(opt.strip()) > 100 for opt in q.options):
+        lines.append("💡 <i>Extended Format: Full question & options will be posted with Option A/B/C/D buttons below.</i>\n")
 
     lines.append(f"❓ <b>{q.display_question}</b>\n")
 
     for opt_idx, opt_text in enumerate(q.options):
         letter = chr(ord("A") + opt_idx)
         opt_len = len(opt_text.strip())
-        len_warning = f" ⚠️ <b>({opt_len} chars / limit 100)</b>" if opt_len > 100 else ""
+        len_tag = f" ℹ️ <i>({opt_len} chars - Extended)</i>" if opt_len > 100 else ""
         if opt_idx == q.correct_option:
-            lines.append(f"<b>[{letter}] {opt_text}</b>  ✅ <i>(Correct Answer)</i>{len_warning}")
+            lines.append(f"<b>[{letter}] {opt_text}</b>  ✅ <i>(Correct Answer)</i>{len_tag}")
         else:
-            lines.append(f"[{letter}] {opt_text}{len_warning}")
+            lines.append(f"[{letter}] {opt_text}{len_tag}")
 
     if q.explanation and settings.explanation_enabled:
         lines.append(f"\n💡 <b>Explanation:</b> {q.explanation}")
@@ -154,7 +157,7 @@ async def edit_current_question_callback(update: Update, context: ContextTypes.D
 
     options_summary = "\n".join(
         [
-            f"[{chr(ord('A') + i)}] {opt} {'✅' if i == q.correct_option else ''}{' ⚠️(' + str(len(opt.strip())) + ' chars / limit 100)' if len(opt.strip()) > 100 else ''}"
+            f"[{chr(ord('A') + i)}] {opt} {'✅' if i == q.correct_option else ''}{' ℹ️ (' + str(len(opt.strip())) + ' chars - Extended)' if len(opt.strip()) > 100 else ''}"
             for i, opt in enumerate(q.options)
         ]
     )
@@ -466,9 +469,9 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
         except ValueError:
             return await preview_callback(update, context)
 
-        if len(text) > TELEGRAM_MAX_OPTION_LENGTH:
+        if len(text) > TELEGRAM_MAX_EXTENDED_OPTION_LENGTH:
             await update.message.reply_text(
-                f"⚠️ Option text is too long ({len(text)} chars). Limit is {TELEGRAM_MAX_OPTION_LENGTH}. Please send a shorter text:"
+                f"⚠️ Option text is too long ({len(text)} chars). Limit is {TELEGRAM_MAX_EXTENDED_OPTION_LENGTH}. Please send a shorter text:"
             )
             return QuizCreationState.EDITING_QUESTION
 

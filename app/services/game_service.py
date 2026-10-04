@@ -12,7 +12,15 @@ from telegram.constants import ParseMode, PollType
 from app.database.database import SessionLocal
 from app.database.repositories import record_battle_result
 from app.parser.models import QuizQuestion
-from app.utils.helpers import format_bilingual_question_text, format_rich_text_for_telegram
+from app.services.telegram_service import (
+    format_extended_question_message,
+    is_extended_option_question,
+)
+from app.utils.helpers import (
+    format_bilingual_question_text,
+    format_rich_text_for_telegram,
+    strip_html_tags,
+)
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -289,11 +297,41 @@ async def run_game_loop(bot: Bot, game: GameSession) -> None:
                 else None
             )
 
+            # Check if this specific question has options exceeding 100 chars
+            if is_extended_option_question(question):
+                text_block = format_extended_question_message(question)
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=text_block,
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception as text_err:
+                    logger.warning("Battle extended question HTML parse failed (%s). Retrying plain text.", text_err)
+                    plain_text = strip_html_tags(text_block)
+                    if len(plain_text) > 4000:
+                        plain_text = plain_text[:3997] + "..."
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=plain_text,
+                        parse_mode=None,
+                    )
+
+                raw_summary = strip_html_tags(question.display_question)
+                if len(raw_summary) > 230:
+                    raw_summary = raw_summary[:227] + "..."
+                poll_prompt = f"🎯 {raw_summary}\n\n👇 Select your answer below:"
+                poll_q_to_send = format_rich_text_for_telegram(poll_prompt, max_plain_length=300)
+                options_to_send = [f"Option {chr(ord('A') + i)}" for i in range(len(question.options))]
+            else:
+                poll_q_to_send = formatted_q
+                options_to_send = question.options
+
             # Send native Quiz Poll (is_anonymous=False is required for Telegram to dispatch poll_answer)
             poll_msg = await bot.send_poll(
                 chat_id=chat_id,
-                question=formatted_q,
-                options=question.options,
+                question=poll_q_to_send,
+                options=options_to_send,
                 type=PollType.QUIZ,
                 is_anonymous=False,
                 correct_option_id=question.correct_option,

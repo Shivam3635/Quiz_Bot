@@ -30,7 +30,7 @@ class QuizService:
         validator: Optional[QuizValidator] = None,
     ):
         self.parser = parser or BulkQuizParser()
-        self.validator = validator or QuizValidator()
+        self.validator = validator or QuizValidator(allow_extended_options=True)
 
     def process_raw_text(self, raw_text: str) -> ProcessBatchResult:
         """Parse raw text and validate all extracted questions."""
@@ -50,8 +50,8 @@ class QuizService:
                 is_ready_for_publish=False,
             )
 
-        # Validate successfully parsed questions against Telegram limits
-        validation_result = self.validator.validate_batch(parsed_batch.questions)
+        # Validate successfully parsed questions against Telegram limits (allowing extended options)
+        validation_result = self.validator.validate_batch(parsed_batch.questions, allow_extended_options=True)
 
         is_ready = (
             not parsed_batch.has_errors

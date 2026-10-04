@@ -10,6 +10,7 @@ logger = setup_logger(__name__)
 # Telegram Poll API constraints
 TELEGRAM_MAX_QUESTION_LENGTH = 300
 TELEGRAM_MAX_OPTION_LENGTH = 100
+TELEGRAM_MAX_EXTENDED_OPTION_LENGTH = 1000
 TELEGRAM_MAX_EXPLANATION_LENGTH = 200
 TELEGRAM_MIN_OPTIONS = 2
 TELEGRAM_MAX_OPTIONS = 10
@@ -91,9 +92,19 @@ class ValidationResult:
 class QuizValidator:
     """Validates QuizQuestion models against Telegram Bot API poll constraints."""
 
-    def validate_single(self, q: QuizQuestion, index: int = 1) -> list[QuestionValidationError]:
+    def __init__(self, allow_extended_options: bool = False):
+        self.allow_extended_options = allow_extended_options
+
+    def validate_single(
+        self,
+        q: QuizQuestion,
+        index: int = 1,
+        allow_extended_options: Optional[bool] = None,
+    ) -> list[QuestionValidationError]:
         """Validate a single question and return all violation errors."""
         errors: list[QuestionValidationError] = []
+        ext_allowed = self.allow_extended_options if allow_extended_options is None else allow_extended_options
+        max_opt_len = TELEGRAM_MAX_EXTENDED_OPTION_LENGTH if ext_allowed else TELEGRAM_MAX_OPTION_LENGTH
 
         # 1. Question text length
         q_len = len(q.question)
@@ -148,14 +159,14 @@ class QuizValidator:
                         message=f"Option {opt_idx + 1} is empty.",
                     )
                 )
-            elif len(stripped_opt) > TELEGRAM_MAX_OPTION_LENGTH:
+            elif len(stripped_opt) > max_opt_len:
                 errors.append(
                     QuestionValidationError(
                         question_index=index,
                         rule="OPTION_TOO_LONG",
                         message=(
                             f"Option {opt_idx + 1} is {len(stripped_opt)} characters "
-                            f"(limit: {TELEGRAM_MAX_OPTION_LENGTH})."
+                            f"(limit: {max_opt_len})."
                         ),
                     )
                 )
@@ -202,13 +213,21 @@ class QuizValidator:
 
         return errors
 
-    def validate_batch(self, questions: list[QuizQuestion]) -> ValidationResult:
+    def validate_batch(
+        self,
+        questions: list[QuizQuestion],
+        allow_extended_options: Optional[bool] = None,
+    ) -> ValidationResult:
         """Validate an entire list of questions and segregate valid vs invalid."""
         valid_list: list[QuizQuestion] = []
         all_errors: list[QuestionValidationError] = []
 
         for idx, q in enumerate(questions, start=1):
-            q_errors = self.validate_single(q, index=idx)
+            q_errors = self.validate_single(
+                q,
+                index=idx,
+                allow_extended_options=allow_extended_options,
+            )
             if q_errors:
                 all_errors.extend(q_errors)
             else:

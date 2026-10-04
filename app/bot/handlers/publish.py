@@ -23,7 +23,7 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 publishing_service = PublishingService()
-validator = QuizValidator()
+validator = QuizValidator(allow_extended_options=True)
 
 
 def format_confirmation_overview(total: int, settings: QuizSettings) -> str:
