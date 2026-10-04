@@ -440,7 +440,8 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
             )
             return QuizCreationState.EDITING_QUESTION
 
-        q.question = text
+        from app.utils.helpers import format_bilingual_question_text
+        q.question = format_bilingual_question_text(text)
         context.user_data.pop("edit_mode", None)
         rem_errs = validator.validate_single(q, current_index + 1)
         if not rem_errs:

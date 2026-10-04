@@ -4,11 +4,11 @@ import html
 import re
 from typing import Optional
 
-# English/Latin character or punctuation followed by Devanagari (Hindi) character
-ENG_TO_HINDI_RE = re.compile(r"([A-Za-z0-9][?.!):\'\"-]*)\s+([\u0900-\u097F])")
+# English sentence with terminal punctuation followed by Devanagari (Hindi) character
+ENG_TO_HINDI_RE = re.compile(r"([A-Za-z0-9][.!:;\-\'\"]+)\s+([\u0900-\u097F])")
 
-# Devanagari character or punctuation followed by English/Latin character
-HINDI_TO_ENG_RE = re.compile(r"([\u0900-\u097F][?.!।:\'\"-]*)\s+([A-Za-z])")
+# Devanagari sentence with terminal punctuation followed by English/Latin character
+HINDI_TO_ENG_RE = re.compile(r"([\u0900-\u097F][।!?:;\-\'\"]+)\s+([A-Za-z])")
 
 # Allowed Telegram HTML formatting tags
 ALLOWED_TELEGRAM_TAGS = {
@@ -42,15 +42,24 @@ def format_bilingual_question_text(text: str) -> str:
             continue
 
         # Check if '?' acts as differentiator with upcoming words on the same line
-        q_match = re.search(r"\?+", cleaned_line)
-        if q_match:
-            start_pos, end_pos = q_match.span()
-            upcoming_words = cleaned_line[end_pos:].strip()
-            if upcoming_words:
-                english_part = cleaned_line[:start_pos].rstrip() + cleaned_line[start_pos:end_pos]
-                formatted_lines.append(english_part)
-                formatted_lines.append(upcoming_words)
-                continue
+        matched_q = False
+        curr = cleaned_line
+        while True:
+            q_match = re.search(r"\?+", curr)
+            if q_match:
+                start_pos, end_pos = q_match.span()
+                upcoming_words = curr[end_pos:].strip()
+                if upcoming_words:
+                    matched_q = True
+                    part = curr[:start_pos].rstrip() + curr[start_pos:end_pos]
+                    formatted_lines.append(part)
+                    curr = upcoming_words
+                    continue
+            break
+
+        if matched_q:
+            formatted_lines.append(curr)
+            continue
 
         # Fallback 1: English -> Hindi transition on same line without '?'
         if ENG_TO_HINDI_RE.search(cleaned_line):

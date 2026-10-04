@@ -308,3 +308,16 @@ def test_format_bilingual_question_text():
     text5 = "What is Python?\nयह क्या है?"
     assert format_bilingual_question_text(text5) == "What is Python?\nयह क्या है?"
 
+    # Acronyms and technical numbers in Hindi part must remain together on next line
+    ncc_text = "What is the motto of NCC? NCC का आदर्श वाक्य क्या है?"
+    assert (
+        format_bilingual_question_text(ncc_text)
+        == "What is the motto of NCC?\nNCC का आदर्श वाक्य क्या है?"
+    )
+
+    rifle_text = "What is the magazine capacity of a .22 Rifle? .22 राइफल की मैगजीन की क्षमता कितनी होती है?"
+    assert (
+        format_bilingual_question_text(rifle_text)
+        == "What is the magazine capacity of a .22 Rifle?\n.22 राइफल की मैगजीन की क्षमता कितनी होती है?"
+    )
+

@@ -26,9 +26,11 @@ class QuizQuestion(BaseModel):
         Return the question with its respective question number prefix (e.g. 'Q1.', 'Q2.').
         Preserves the exact prefix as provided during quiz creation (e.g. 'Q1.', '1.').
         """
+        from app.utils.helpers import format_bilingual_question_text
+
         # If question text already begins with a numbering prefix, avoid duplicating
         if re.match(r"^(?:(?:Q|Question|प्रश्न)\s*\d+|\d+)[\.\)\:\-\s]", self.question, re.IGNORECASE):
-            return self.question
+            return format_bilingual_question_text(self.question)
 
         # Determine prefix to prepend
         prefix = ""
@@ -41,14 +43,17 @@ class QuizQuestion(BaseModel):
             prefix = f"Q{self.question_number}."
 
         if prefix:
-            return f"{prefix} {self.question}"
-        return self.question
+            return format_bilingual_question_text(f"{prefix} {self.question}")
+        return format_bilingual_question_text(self.question)
 
     @field_validator("question", mode="before")
     @classmethod
     def strip_question(cls, v: str) -> str:
-        """Strip whitespace from question text."""
-        return v.strip() if isinstance(v, str) else v
+        """Strip whitespace and format bilingual question text."""
+        if isinstance(v, str):
+            from app.utils.helpers import format_bilingual_question_text
+            return format_bilingual_question_text(v.strip())
+        return v
 
     @field_validator("options", mode="before")
     @classmethod

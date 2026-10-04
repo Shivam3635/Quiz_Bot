@@ -208,9 +208,11 @@ async def preview_saved_quiz_callback(update: Update, context: ContextTypes.DEFA
 
         expl_text = f"\n\n💡 <b>Explanation:</b> {q.explanation}" if q.explanation else ""
 
+        from app.utils.helpers import format_bilingual_question_text
+        display_q_text = format_bilingual_question_text(q.question)
         text = (
             f"📋 <b>Question {idx + 1} of {total_q}</b>\n\n"
-            f"<b>{q.question}</b>\n\n"
+            f"<b>{display_q_text}</b>\n\n"
             + "\n".join(opt_lines)
             + expl_text
         )
