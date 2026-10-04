@@ -116,10 +116,7 @@ class TelegramService:
                     raise
 
             # Letter poll directly below the text block
-            raw_summary = strip_html_tags(question.display_question)
-            if len(raw_summary) > 230:
-                raw_summary = raw_summary[:227] + "..."
-            poll_prompt = f"🎯 {raw_summary}\n\n👇 Select your answer below:"
+            poll_prompt = "👇 Select your answer below:"
             poll_question = format_rich_text_for_telegram(poll_prompt, max_plain_length=300)
             letter_options = [f"Option {chr(ord('A') + i)}" for i in range(len(question.options))]
 

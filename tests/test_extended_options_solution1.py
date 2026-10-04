@@ -151,7 +151,8 @@ async def test_publish_extended_question_solution1():
     assert poll_kwargs["chat_id"] == "-100123456789"
     assert poll_kwargs["options"] == ["Option A", "Option B", "Option C", "Option D"]
     assert poll_kwargs["correct_option_id"] == 0
-    assert "Select your answer below" in poll_kwargs["question"]
+    assert poll_kwargs["question"] == "👇 Select your answer below:"
+    assert "What is the significance" not in poll_kwargs["question"]
 
 
 @pytest.mark.asyncio

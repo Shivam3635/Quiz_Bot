@@ -317,10 +317,7 @@ async def run_game_loop(bot: Bot, game: GameSession) -> None:
                         parse_mode=None,
                     )
 
-                raw_summary = strip_html_tags(question.display_question)
-                if len(raw_summary) > 230:
-                    raw_summary = raw_summary[:227] + "..."
-                poll_prompt = f"🎯 {raw_summary}\n\n👇 Select your answer below:"
+                poll_prompt = "👇 Select your answer below:"
                 poll_q_to_send = format_rich_text_for_telegram(poll_prompt, max_plain_length=300)
                 options_to_send = [f"Option {chr(ord('A') + i)}" for i in range(len(question.options))]
             else:
