@@ -1,9 +1,9 @@
-# BulkQuiz Telegram Bot
+# QuizBotPro Telegram Bot
 
 > **"Create hundreds of Telegram quizzes in seconds."**
 > *One paste. One setup. Hundreds of quizzes.*
 
-BulkQuiz is a production-grade Telegram bot designed for quiz channel owners, educators, coaching institutes, and communities. Instead of manually entering dozens of questions, choices, answers, and timer settings one-by-one via traditional bots, BulkQuiz enables users to paste batches of questions, configure common quiz settings once, preview them interactively, and publish native Telegram quiz polls with live progress.
+QuizBotPro is a production-grade Telegram bot designed for quiz channel owners, educators, coaching institutes, and communities. Instead of manually entering dozens of questions, choices, answers, and timer settings one-by-one via traditional bots, QuizBotPro enables users to paste batches of questions, configure common quiz settings once, preview them interactively, and publish native Telegram quiz polls with live progress.
 
 ---
 
@@ -22,7 +22,7 @@ BulkQuiz is a production-grade Telegram bot designed for quiz channel owners, ed
 ## 📁 Architecture Overview
 
 ```text
-bulkquiz/
+quizbotpro/
 ├── app/
 │   ├── main.py                  # Bot entry point and bootstrap
 │   ├── config/                  # Pydantic Settings & environment config
@@ -53,7 +53,7 @@ bulkquiz/
 ```bash
 # Clone the repository
 git clone <repo-url>
-cd BulkQuiz
+cd QuizBotPro
 
 # Create and activate virtual environment
 python -m venv .venv
@@ -80,7 +80,7 @@ Edit `.env` and fill in your values:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-DATABASE_URL=sqlite:///bulkquiz.db
+DATABASE_URL=sqlite:///quizbotpro.db
 LOG_LEVEL=INFO
 ENVIRONMENT=development
 ```

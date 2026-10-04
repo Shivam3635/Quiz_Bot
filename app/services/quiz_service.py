@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.parser.models import ParsedBatch, QuizQuestion, QuizSettings
-from app.parser.parser import BulkQuizParser
+from app.parser.parser import QuizBotProParser
 from app.parser.validator import QuizValidator, ValidationResult
 from app.utils.logger import setup_logger
 
@@ -26,10 +26,10 @@ class QuizService:
 
     def __init__(
         self,
-        parser: Optional[BulkQuizParser] = None,
+        parser: Optional[QuizBotProParser] = None,
         validator: Optional[QuizValidator] = None,
     ):
-        self.parser = parser or BulkQuizParser()
+        self.parser = parser or QuizBotProParser()
         self.validator = validator or QuizValidator(allow_extended_options=True)
 
     def process_raw_text(self, raw_text: str) -> ProcessBatchResult:

@@ -106,7 +106,7 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if chat.type == ChatType.PRIVATE:
         if args and args[0].isdigit():
             quiz_id = int(args[0])
-            bot_username = context.bot.username or "BulkQuizBot"
+            bot_username = context.bot.username or "QuizBotPro"
             kb = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
@@ -141,7 +141,7 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        bot_username = context.bot.username or "BulkQuizBot"
+        bot_username = context.bot.username or "QuizBotPro"
         kb_rows = []
         for qs in quiz_sets:
             kb_rows.append([

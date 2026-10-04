@@ -299,7 +299,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"OK - BulkQuiz Bot is active and healthy")
+        self.wfile.write(b"OK - QuizBotPro is active and healthy")
 
     def do_HEAD(self) -> None:
         self.send_response(200)
@@ -321,9 +321,9 @@ def start_health_check_server(port: int) -> None:
 
 
 def main() -> None:
-    """Run the BulkQuiz bot."""
+    """Run the QuizBotPro."""
     settings = get_settings()
-    logger.info("Starting BulkQuiz Bot in %s mode...", settings.ENVIRONMENT)
+    logger.info("Starting QuizBotPro in %s mode...", settings.ENVIRONMENT)
 
     # Start health-check server if PORT is provided by hosting environment (Render, etc.)
     port_env = os.environ.get("PORT")
@@ -342,7 +342,7 @@ def main() -> None:
         sys.exit(1)
 
     app = create_bot_app()
-    logger.info("All BulkQuiz bot handlers successfully registered. Starting polling...")
+    logger.info("All QuizBotPro bot handlers successfully registered. Starting polling...")
     app.run_polling()
 
 

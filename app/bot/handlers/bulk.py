@@ -15,7 +15,7 @@ from app.bot.states import QuizCreationState
 from app.database.database import SessionLocal
 from app.database.repositories import get_or_create_user, save_quiz_batch
 from app.parser.models import QuizSettings
-from app.parser.parser import BulkQuizParser
+from app.parser.parser import QuizBotProParser
 from app.services.quiz_service import QuizService
 from app.services.session_service import SessionManager
 from app.utils.logger import setup_logger
@@ -23,7 +23,7 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 quiz_service = QuizService()
 session_manager = SessionManager()
-fast_parser = BulkQuizParser()
+fast_parser = QuizBotProParser()
 
 TITLE_PROMPT_MESSAGE = (
     "✨ <b>Let's create a new quiz!</b>\n\n"

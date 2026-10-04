@@ -360,7 +360,7 @@ async def republish_change_dest_callback(update: Update, context: ContextTypes.D
         "📢 <b>Change Target Destination</b>\n\n"
         "Send the <b>@username</b> of your target channel or group (e.g. <code>@myquizchannel</code>).\n"
         "<i>(Or send <code>this</code> or <code>me</code> to publish here in this conversation)</i>\n\n"
-        "⚠️ <b>Important:</b> Ensure BulkQuiz is added as an <b>Administrator</b> with 'Post Messages' permissions in that channel."
+        "⚠️ <b>Important:</b> Ensure QuizBotPro is added as an <b>Administrator</b> with 'Post Messages' permissions in that channel."
     )
 
     if query.message:

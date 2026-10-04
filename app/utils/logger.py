@@ -1,11 +1,11 @@
-"""Logging configuration for BulkQuiz."""
+"""Logging configuration for QuizBotPro."""
 
 import logging
 import sys
 from app.config.settings import get_settings
 
 
-def setup_logger(name: str = "bulkquiz") -> logging.Logger:
+def setup_logger(name: str = "quizbotpro") -> logging.Logger:
     """Configure and return a structured console logger."""
     settings = get_settings()
 

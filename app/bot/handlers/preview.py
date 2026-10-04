@@ -11,7 +11,7 @@ from app.bot.keyboards.preview import (
 )
 from app.bot.states import QuizCreationState
 from app.parser.models import QuizQuestion, QuizSettings
-from app.parser.parser import BulkQuizParser
+from app.parser.parser import QuizBotProParser
 from app.parser.validator import (
     QuizValidator,
     TELEGRAM_MAX_EXPLANATION_LENGTH,
@@ -28,7 +28,7 @@ from app.database.repositories import (
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
-parser = BulkQuizParser()
+parser = QuizBotProParser()
 validator = QuizValidator(allow_extended_options=True)
 
 

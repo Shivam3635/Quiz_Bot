@@ -58,7 +58,7 @@ class _DraftBlock:
     explanation_raw: Optional[str] = None
 
 
-class BulkQuizParser:
+class QuizBotProParser:
     """Parser that converts raw text batches into structured QuizQuestion models."""
 
     def parse(self, raw_text: str) -> ParsedBatch:
@@ -318,3 +318,7 @@ class BulkQuizParser:
                 return i
 
         return None
+
+
+# Backwards compatible alias
+BulkQuizParser = QuizBotProParser

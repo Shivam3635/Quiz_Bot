@@ -10,10 +10,10 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 WELCOME_MESSAGE = (
-    "👋 <b>Welcome to BulkQuiz!</b>\n\n"
+    "👋 <b>Welcome to QuizBotPro!</b>\n\n"
     "<i>Create hundreds of Telegram quizzes in seconds.</i>\n\n"
     "Tired of typing quiz questions and choices one by one? "
-    "With BulkQuiz, you simply paste your questions, configure settings once, and publish them all.\n\n"
+    "With QuizBotPro, you simply paste your questions, configure settings once, and publish them all.\n\n"
     "Choose an action below to get started:"
 )
 

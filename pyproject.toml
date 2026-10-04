@@ -1,8 +1,8 @@
 [project]
-name = "bulkquiz"
+name = "quizbotpro"
 version = "0.1.0"
-description = "Bulk Telegram Quiz Poll Creator Bot - One paste. One setup. Hundreds of quizzes."
-authors = [{ name = "BulkQuiz Team" }]
+description = "QuizBotPro Telegram Quiz Poll Creator Bot - One paste. One setup. Hundreds of quizzes."
+authors = [{ name = "QuizBotPro Team" }]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

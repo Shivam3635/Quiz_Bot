@@ -1,4 +1,4 @@
-"""Comprehensive tests for BulkQuiz parser."""
+"""Comprehensive tests for QuizBotPro parser."""
 
 import pytest
 from app.parser.parser import BulkQuizParser

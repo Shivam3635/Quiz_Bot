@@ -9,8 +9,8 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 HELP_MESSAGE = (
-    "❓ <b>BulkQuiz Help & Usage Guide</b>\n\n"
-    "BulkQuiz lets you bulk-create native Telegram quiz polls quickly.\n\n"
+    "❓ <b>QuizBotPro Help & Usage Guide</b>\n\n"
+    "QuizBotPro lets you bulk-create native Telegram quiz polls quickly.\n\n"
     "<b>Supported Question Format:</b>\n"
     "<code>"
     "Q1. What is the capital of India?\n"

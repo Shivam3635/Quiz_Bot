@@ -1,4 +1,4 @@
-"""FSM States for BulkQuiz Telegram Bot."""
+"""FSM States for QuizBotPro Telegram Bot."""
 
 from enum import IntEnum, auto
 

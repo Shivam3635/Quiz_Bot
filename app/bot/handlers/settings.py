@@ -232,7 +232,7 @@ async def prompt_channel_dest_callback(update: Update, context: ContextTypes.DEF
         await query.edit_message_text(
             "📢 <b>Configure Target Channel or Group</b>\n\n"
             "Send the <b>@username</b> of your target channel or group (e.g. <code>@myquizchannel</code>).\n\n"
-            "⚠️ <b>Important:</b> Ensure BulkQuiz is added as an <b>Administrator</b> with 'Post Messages' permissions in that channel.",
+            "⚠️ <b>Important:</b> Ensure QuizBotPro is added as an <b>Administrator</b> with 'Post Messages' permissions in that channel.",
             reply_markup=cancel_kb,
             parse_mode=ParseMode.HTML,
         )

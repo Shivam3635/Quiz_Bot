@@ -1,4 +1,4 @@
-"""Main menu keyboards for BulkQuiz."""
+"""Main menu keyboards for QuizBotPro."""
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 

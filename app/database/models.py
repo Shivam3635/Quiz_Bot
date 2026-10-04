@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for BulkQuiz."""
+"""SQLAlchemy ORM models for QuizBotPro."""
 
 from datetime import datetime, timezone
 from typing import Optional

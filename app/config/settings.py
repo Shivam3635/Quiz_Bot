@@ -1,4 +1,4 @@
-"""Configuration settings for BulkQuiz application."""
+"""Configuration settings for QuizBotPro application."""
 
 from functools import lru_cache
 from typing import Literal
@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = "mock_token_for_tests"
 
     # Database
-    DATABASE_URL: str = "sqlite:///bulkquiz.db"
+    DATABASE_URL: str = "sqlite:///quizbotpro.db"
 
     # Logging & Environment
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
