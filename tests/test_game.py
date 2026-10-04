@@ -131,6 +131,15 @@ def test_game_manager_lifecycle(sample_game_questions):
     assert session.time_limit == 20
     assert manager.get_game(-100123456) is session
 
+    # Host/Publisher is NOT automatically added as ready
+    assert len(session.scores) == 0
+    assert 99 not in session.scores
+
+    # Host/Publisher clicks 'I am ready'
+    session.add_participant(user_id=99, full_name="Admin")
+    assert len(session.scores) == 1
+    assert 99 in session.scores
+
     # Map poll
     manager.poll_to_chat["poll_abc"] = -100123456
     assert manager.get_game_by_poll("poll_abc") is session

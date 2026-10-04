@@ -142,7 +142,7 @@ class GameSession:
                 f"• {p.display_name}" for p in self.scores.values()
             )
         else:
-            players_list = "<i>No players joined yet. Tap 'Join Quiz' below!</i>"
+            players_list = "<i>No players ready yet. Tap '🙋 I am ready!' below!</i>"
 
         wait_note = (
             f"⏳ <i>Waiting for at least 2 players to vote I am ready ({player_count}/2)...</i>"
@@ -238,8 +238,6 @@ class QuizGameManager:
             initiator_id=initiator_id,
             initiator_name=initiator_name,
         )
-        # Register host automatically
-        session.add_participant(user_id=initiator_id, full_name=initiator_name)
         self.active_games[chat_id] = session
         return session
 
