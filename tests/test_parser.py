@@ -296,3 +296,15 @@ def test_format_bilingual_question_text():
     # Pure Hindi remains single line
     assert format_bilingual_question_text("भारत की राजधानी क्या है?") == "भारत की राजधानी क्या है?"
 
+    # Hinglish / Latin script upcoming words after ?
+    text3 = "What is photosynthesis? prakash sanshleshan kya hai?"
+    assert format_bilingual_question_text(text3) == "What is photosynthesis?\nprakash sanshleshan kya hai?"
+
+    # Accidental space before ?
+    text4 = "What is the capital of India ? भारत की राजधानी क्या है?"
+    assert format_bilingual_question_text(text4) == "What is the capital of India?\nभारत की राजधानी क्या है?"
+
+    # Idempotent (already on multiple lines)
+    text5 = "What is Python?\nयह क्या है?"
+    assert format_bilingual_question_text(text5) == "What is Python?\nयह क्या है?"
+

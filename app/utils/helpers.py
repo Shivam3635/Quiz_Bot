@@ -25,6 +25,9 @@ def format_bilingual_question_text(text: str) -> str:
     """
     Format bilingual questions so that the second language (e.g. Hindi)
     starts on a new line instead of continuing on the same line as English.
+    The question mark '?' acts as the differentiator between English and
+    Hindi question. When '?' occurs, all upcoming words are treated as the
+    Hindi question and moved to the next line.
     """
     if not text:
         return text
@@ -38,14 +41,27 @@ def format_bilingual_question_text(text: str) -> str:
         if not cleaned_line:
             continue
 
-        # English -> Hindi transition on same line
+        # Check if '?' acts as differentiator with upcoming words on the same line
+        q_match = re.search(r"\?+", cleaned_line)
+        if q_match:
+            start_pos, end_pos = q_match.span()
+            upcoming_words = cleaned_line[end_pos:].strip()
+            if upcoming_words:
+                english_part = cleaned_line[:start_pos].rstrip() + cleaned_line[start_pos:end_pos]
+                formatted_lines.append(english_part)
+                formatted_lines.append(upcoming_words)
+                continue
+
+        # Fallback 1: English -> Hindi transition on same line without '?'
         if ENG_TO_HINDI_RE.search(cleaned_line):
             cleaned_line = ENG_TO_HINDI_RE.sub(r"\1\n\2", cleaned_line, count=1)
-        # Hindi -> English transition on same line
+            formatted_lines.extend([l.strip() for l in cleaned_line.split("\n") if l.strip()])
+        # Fallback 2: Hindi -> English transition on same line without '?'
         elif HINDI_TO_ENG_RE.search(cleaned_line):
             cleaned_line = HINDI_TO_ENG_RE.sub(r"\1\n\2", cleaned_line, count=1)
-
-        formatted_lines.append(cleaned_line)
+            formatted_lines.extend([l.strip() for l in cleaned_line.split("\n") if l.strip()])
+        else:
+            formatted_lines.append(cleaned_line)
 
     return "\n".join(formatted_lines)
 
