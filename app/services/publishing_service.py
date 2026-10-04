@@ -9,7 +9,6 @@ from telegram.error import RetryAfter, TelegramError
 
 from app.config.settings import get_settings
 from app.parser.models import QuizQuestion, QuizSettings
-from app.parser.validator import validate_option_length
 from app.services.telegram_service import TelegramService
 from app.utils.logger import setup_logger
 
@@ -92,24 +91,6 @@ class PublishingService:
         successful = 0
         failed = 0
         failed_items: list[FailedQuestionItem] = []
-
-        # Layer 1: Atomic batch pre-publish validation across all questions and options
-        for q_idx, q in enumerate(questions, start=1):
-            for opt_idx, opt in enumerate(q.options):
-                val_res = validate_option_length(opt)
-                if not val_res.valid:
-                    opt_letter = chr(ord("A") + opt_idx)
-                    logger.error(
-                        "OPTION_LENGTH_VALIDATION question=%d option=%s length=%d limit=%d status=overflow",
-                        q_idx,
-                        opt_letter,
-                        val_res.length,
-                        val_res.limit,
-                    )
-                    raise ValueError(
-                        f"Atomic validation failed before publishing: Question {q_idx} Option {opt_letter} "
-                        f"exceeds 100-character limit ({val_res.length}/{val_res.limit}). Publication halted."
-                    )
 
         delay = self.settings.DEFAULT_DELAY_BETWEEN_POSTS
 

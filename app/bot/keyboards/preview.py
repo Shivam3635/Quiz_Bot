@@ -96,20 +96,6 @@ def get_edit_question_keyboard(
     if current_opt_row:
         opt_edit_rows.append(current_opt_row)
 
-    # Auto-shorten buttons for any oversized options
-    auto_shorten_rows = []
-    for opt_idx, opt_text in enumerate(q.options):
-        if len(opt_text.strip()) > 100:
-            letter = chr(ord("A") + opt_idx)
-            auto_shorten_rows.append(
-                [
-                    InlineKeyboardButton(
-                        f"✨ Auto-Shorten Opt {letter} ({len(opt_text.strip())}/100)",
-                        callback_data=f"auto_shorten_single_{current_index}_{opt_idx}",
-                    )
-                ]
-            )
-
     q_len = len(q.question.strip())
     q_warn = f" ⚠️ ({q_len}/300)" if q_len > 300 or q_len == 0 else ""
 
@@ -125,7 +111,6 @@ def get_edit_question_keyboard(
         ans_buttons,
         [InlineKeyboardButton(f"✏️ Edit Question Text{q_warn}", callback_data="edit_q_text")],
         *opt_edit_rows,
-        *auto_shorten_rows,
         [
             InlineKeyboardButton(f"💡 Edit Explanation{expl_warn}", callback_data="edit_q_expl"),
             InlineKeyboardButton("📋 Copyable Format", callback_data="show_copyable_q"),

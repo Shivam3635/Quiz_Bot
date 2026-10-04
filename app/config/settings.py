@@ -1,13 +1,8 @@
 """Configuration settings for BulkQuiz application."""
 
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# Canonical Telegram API poll limits
-TELEGRAM_OPTION_MAX_LENGTH: int = 100
-TELEGRAM_QUESTION_MAX_LENGTH: int = 300
-TELEGRAM_EXPLANATION_MAX_LENGTH: int = 200
 
 
 class Settings(BaseSettings):
@@ -26,13 +21,7 @@ class Settings(BaseSettings):
     # Telegram Publishing & Rate Limiting defaults
     MAX_OPTIONS_PER_QUESTION: int = 10
     MIN_OPTIONS_PER_QUESTION: int = 2
-    TELEGRAM_OPTION_MAX_LENGTH: int = TELEGRAM_OPTION_MAX_LENGTH
     DEFAULT_DELAY_BETWEEN_POSTS: float = 1.0  # seconds between quiz creations
-
-    # AI Shortening Integration
-    GEMINI_API_KEY: Optional[str] = None
-    OPENAI_API_KEY: Optional[str] = None
-    AI_SHORTENER_ENABLED: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.local"),
@@ -45,4 +34,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return cached application settings instance."""
     return Settings()
-

@@ -426,36 +426,26 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
             else 1
         )
         context.user_data["preview_index"] = max(0, first_invalid_idx - 1)
-        unique_failed = len(result.validation.failed_question_indices)
 
-        if result.validation.has_oversized_options:
-            oversized_count = len(result.validation.oversized_option_errors)
-            oversized_summary = result.validation.format_oversized_options_summary()
-            msg_text = (
-                f"⚠️ <b>{oversized_count} option(s) exceed Telegram's 100-character limit:</b>\n\n"
-                f"{oversized_summary}\n\n"
-                "💡 <i>Quiz options must be 100 characters or fewer. "
-                "Tap <b>✨ Auto Shorten Options</b> to intelligently compress them while preserving meaning, or edit manually:</i>"
-            )
-        else:
-            custom_footer = (
-                "💡 <i>You can fix these questions right now using the in-app editor,\n"
-                "drop the invalid ones, or send additional parts:</i>"
-            )
-            report = result.validation.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
-            msg_text = (
-                f"❌ <b>Validation Notice</b>\n\n"
-                f"• Parts combined: <b>{session.total_parts}</b>\n"
-                f"• Total questions: <b>{result.validation.total_questions}</b>\n"
-                f"• Issues needing fix: <b>{result.validation.error_count}</b>\n\n"
-                f"{report}"
-            )
+        custom_footer = (
+            "💡 <i>You can fix these questions right now using the in-app editor,\n"
+            "drop the invalid ones, or send additional parts:</i>"
+        )
+        report = result.validation.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
+
+        unique_failed = len(result.validation.failed_question_indices)
+        msg_text = (
+            f"❌ <b>Validation Notice</b>\n\n"
+            f"• Parts combined: <b>{session.total_parts}</b>\n"
+            f"• Total questions: <b>{result.validation.total_questions}</b>\n"
+            f"• Issues needing fix: <b>{result.validation.error_count}</b>\n\n"
+            f"{report}"
+        )
 
         val_keyboard = get_validation_error_keyboard(
             first_invalid_idx=first_invalid_idx,
             total_valid=result.validation.valid_count,
             total_invalid=unique_failed,
-            has_oversized=result.validation.has_oversized_options,
         )
 
         if status_msg:

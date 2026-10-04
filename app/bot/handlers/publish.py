@@ -80,7 +80,6 @@ async def confirm_publish_callback(update: Update, context: ContextTypes.DEFAULT
             first_invalid_idx=first_err_idx,
             total_valid=val_res.valid_count,
             total_invalid=len(val_res.failed_question_indices),
-            has_oversized=val_res.has_oversized_options,
         )
         if query and query.message:
             await query.edit_message_text(warn_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
