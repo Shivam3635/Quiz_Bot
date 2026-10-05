@@ -170,3 +170,29 @@ async def test_drop_broken_question_retains_valid():
     assert next_state == QuizCreationState.CONFIGURING_SETTINGS
     assert len(context.user_data.get("bulk_questions")) == 1
     assert context.user_data.get("bulk_questions")[0].question == "Capital of France?"
+
+
+@pytest.mark.asyncio
+async def test_hindi_north_question_not_mistaken_for_answer():
+    """Questions starting with 'उत्तर' (Hindi for 'North') should not be mistaken for answer lines."""
+    from app.parser.parser import QuizBotProParser
+
+    raw_text = (
+        "Q12. How many types of North are there?\n"
+        "उत्तर कितने प्रकार के होते हैं?\n"
+        "A. 3 ✅\n"
+        "B. 5\n"
+        "C. 8\n"
+        "D. 10"
+    )
+    parser = QuizBotProParser()
+    result = parser.parse(raw_text)
+
+    assert not result.has_errors
+    assert len(result.questions) == 1
+    q = result.questions[0]
+    assert "How many types of North are there?" in q.question
+    assert "उत्तर कितने प्रकार के होते हैं?" in q.question
+    assert q.options == ["3", "5", "8", "10"]
+    assert q.correct_option == 0
+

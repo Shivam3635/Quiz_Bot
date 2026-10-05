@@ -27,13 +27,13 @@ OPTION_LINE_RE = re.compile(
 
 # Answer line: Answer: B / Ans: B / Correct: B / Correct Answer: B / उत्तर: B
 ANSWER_LINE_RE = re.compile(
-    r"^(?:Answer|Ans|Correct\s*Answer|Correct|उत्तर)\s*[\:\-\=\s]+\s*(.+)$",
+    r"^(?:Answer|Ans|Correct\s*Answer|Correct|उत्तर)\s*(?:(?:is|hai|होगा)?\s*[\:\-\=\.]\s*(.+)|(?:\s+(?:is|hai|होगा)?\s*([A-Za-z0-9\(\)\[\]\✅\✔️\*]+)))$",
     re.IGNORECASE,
 )
 
 # Explanation line: Explanation: ... / Expl: ... / Note: ... / व्याख्या: ...
 EXPLANATION_LINE_RE = re.compile(
-    r"^(?:Explanation|Expl|Note|Why|व्याख्या|स्पष्टीकरण)\s*[\:\-\=\s]+\s*(.+)$",
+    r"^(?:Explanation|Expl|Note|Why|व्याख्या|स्पष्टीकरण)\s*[\:\-\=\.]\s*(.+)$",
     re.IGNORECASE,
 )
 
@@ -118,14 +118,17 @@ class QuizBotProParser:
                 continue
 
             # Case 2: Answer line
-            if ans_match and current is not None:
-                current.answer_raw = ans_match.group(1).strip()
-                continue
+            # An answer line is only valid after options have started and must not be a question ending in ? or ؟.
+            if ans_match and current is not None and not line.rstrip().endswith(("?", "؟")):
+                if len(current.options) > 0:
+                    current.answer_raw = (ans_match.group(1) or ans_match.group(2) or "").strip()
+                    continue
 
             # Case 3: Explanation line
-            if expl_match and current is not None:
-                current.explanation_raw = expl_match.group(1).strip()
-                continue
+            if expl_match and current is not None and not line.rstrip().endswith(("?", "؟")):
+                if len(current.options) > 0 or current.answer_raw is not None:
+                    current.explanation_raw = expl_match.group(1).strip()
+                    continue
 
             # Case 4: Numeric line at start of question (e.g. 1. What is..., 2. What is...)
             # A numeric line is treated as a NEW question if:
