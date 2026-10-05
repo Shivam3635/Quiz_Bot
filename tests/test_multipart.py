@@ -196,3 +196,81 @@ def test_10_session_timeout(session_mgr):
     # Retrieving active session should clear it and return None
     active = session_mgr.get_active_session(user_id=10, chat_id=10)
     assert active is None
+
+
+@pytest.mark.asyncio
+async def test_11_newquiz_after_saved_quiz_creates_fresh_session():
+    """Verify that completing a quiz allows creating a new quiz without 'unfinished quiz' warning."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.bot.handlers.bulk import clear_creation_session, start_quiz_session_flow
+    from app.bot.states import QuizCreationState
+    from app.parser.models import QuizSettings
+    from app.services.session_service import session_manager
+
+    user_id = 999
+    chat_id = 999
+
+    # Simulate completed and saved quiz in context
+    context = MagicMock()
+    context.user_data = {
+        "saved_quiz_set_id": 42,
+        "quiz_settings": QuizSettings(title="Old Quiz"),
+        "bulk_questions": ["Q1"],
+    }
+    session_manager.discard_session(user_id, chat_id)
+
+    update = MagicMock()
+    update.effective_user.id = user_id
+    update.effective_chat.id = chat_id
+    update.callback_query = None
+    update.message = AsyncMock()
+
+    # Call start_quiz_session_flow (e.g. user sends /newquiz)
+    next_state = await start_quiz_session_flow(update, context)
+
+    # Must advance to WAITING_FOR_TITLE, not blocked
+    assert next_state == QuizCreationState.WAITING_FOR_TITLE
+    # Stale saved_quiz_set_id must be cleared
+    assert "saved_quiz_set_id" not in context.user_data
+    # Replied with new quiz prompt
+    update.message.reply_text.assert_called_once()
+    called_text = update.message.reply_text.call_args[0][0]
+    assert "unfinished quiz" not in called_text.lower()
+    assert "title" in called_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_12_unfinished_quiz_warns_when_draft_parts_exist():
+    """Verify that an actual unfinished session with parts blocks and warns."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.bot.handlers.bulk import start_quiz_session_flow
+    from app.bot.states import QuizCreationState
+    from app.services.session_service import session_manager
+
+    user_id = 888
+    chat_id = 888
+
+    # Create an active session with parts
+    session = session_manager.create_session(user_id, chat_id)
+    session.add_part("Q1. Test?\nA) 1\nB) 2\nAnswer: A", detected_questions=1)
+
+    context = MagicMock()
+    context.user_data = {}
+
+    update = MagicMock()
+    update.effective_user.id = user_id
+    update.effective_chat.id = chat_id
+    update.callback_query = None
+    update.message = AsyncMock()
+
+    next_state = await start_quiz_session_flow(update, context)
+
+    # Should remain in WAITING_FOR_BULK_INPUT with warning
+    assert next_state == QuizCreationState.WAITING_FOR_BULK_INPUT
+    update.message.reply_text.assert_called_once()
+    called_text = update.message.reply_text.call_args[0][0]
+    assert "unfinished quiz" in called_text.lower()
+
+    # Clean up
+    session_manager.discard_session(user_id, chat_id)
+

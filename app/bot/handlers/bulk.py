@@ -17,12 +17,11 @@ from app.database.repositories import get_or_create_user, save_quiz_batch
 from app.parser.models import QuizSettings
 from app.parser.parser import QuizBotProParser
 from app.services.quiz_service import QuizService
-from app.services.session_service import SessionManager
+from app.services.session_service import session_manager
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 quiz_service = QuizService()
-session_manager = SessionManager()
 fast_parser = QuizBotProParser()
 
 TITLE_PROMPT_MESSAGE = (
@@ -35,6 +34,21 @@ DESC_PROMPT_MESSAGE = (
     "👍 <b>Good.</b> Now send me a <b>description</b> for your quiz.\n\n"
     "This is optional, you can send /skip."
 )
+
+
+def clear_creation_session(context: ContextTypes.DEFAULT_TYPE, user_id: int, chat_id: int) -> None:
+    """Safely clear creation session from session_manager and remove all draft keys from user_data."""
+    session_manager.discard_session(user_id, chat_id)
+    context.user_data.pop("active_session_id", None)
+    context.user_data.pop("bulk_questions", None)
+    context.user_data.pop("quiz_settings", None)
+    context.user_data.pop("saved_quiz_set_id", None)
+    context.user_data.pop("preview_index", None)
+    context.user_data.pop("last_part_status_msg_id", None)
+    context.user_data.pop("failed_questions", None)
+    context.user_data.pop("waiting_for_title_text", None)
+    context.user_data.pop("waiting_for_desc_text", None)
+    context.user_data.pop("waiting_for_channel_text", None)
 
 
 def format_bulk_prompt_message(settings: QuizSettings) -> str:
@@ -67,12 +81,23 @@ async def start_quiz_session_flow(update: Update, context: ContextTypes.DEFAULT_
     if query:
         await query.answer()
 
+    # If previous quiz was already completed and persisted, clear stale session data immediately
+    if context.user_data.get("saved_quiz_set_id"):
+        clear_creation_session(context, user_id, chat_id)
+
     # Check for active unfinished quiz session or draft
     existing_session = session_manager.get_active_session(user_id, chat_id)
-    has_active_draft = (
-        context.user_data.get("quiz_settings") is not None
-        or (existing_session and existing_session.status in ("WAITING_FOR_INPUT", "PROCESSING"))
-    )
+    has_active_draft = False
+    if existing_session and existing_session.status in ("WAITING_FOR_INPUT", "PROCESSING"):
+        if existing_session.total_parts > 0:
+            has_active_draft = True
+        elif context.user_data.get("active_session_id") == existing_session.session_id:
+            settings = context.user_data.get("quiz_settings")
+            if settings and (settings.title or settings.description):
+                has_active_draft = True
+    elif context.user_data.get("bulk_questions") and not context.user_data.get("saved_quiz_set_id"):
+        has_active_draft = True
+
     if has_active_draft:
         text = "You have an unfinished quiz. Please finish creating your quiz or send /cancel to discard it."
         if query and query.message:
@@ -86,10 +111,9 @@ async def start_quiz_session_flow(update: Update, context: ContextTypes.DEFAULT_
         return QuizCreationState.WAITING_FOR_TITLE
 
     # Reset / initialize fresh settings for the new quiz
+    clear_creation_session(context, user_id, chat_id)
     settings = QuizSettings()
     context.user_data["quiz_settings"] = settings
-    context.user_data.pop("active_session_id", None)
-    context.user_data.pop("bulk_questions", None)
 
     # Prompt for Title first without inline buttons (clean text prompt like @QuizBot)
     if query and query.message:
@@ -549,7 +573,7 @@ async def creation_timer_callback(update: Update, context: ContextTypes.DEFAULT_
     except Exception as db_err:
         logger.error("Could not persist quiz batch on creation: %s", db_err)
 
-    session_manager.discard_session(user_id, chat_id)
+    clear_creation_session(context, user_id, chat_id)
 
     from app.bot.keyboards.myquizzes import get_quiz_details_keyboard
 
@@ -588,11 +612,7 @@ async def cancel_quiz_creation(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id if update.effective_user else 0
     chat_id = update.effective_chat.id if update.effective_chat else 0
 
-    session_manager.discard_session(user_id, chat_id)
-    context.user_data.pop("active_session_id", None)
-    context.user_data.pop("bulk_questions", None)
-    context.user_data.pop("quiz_settings", None)
-    context.user_data.pop("preview_index", None)
+    clear_creation_session(context, user_id, chat_id)
 
     from app.bot.handlers.start import WELCOME_MESSAGE
     from app.bot.keyboards.main import get_main_menu_keyboard

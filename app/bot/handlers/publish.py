@@ -192,8 +192,8 @@ async def start_publishing_callback(update: Update, context: ContextTypes.DEFAUL
     # Clean up or prepare retry
     if summary.is_complete_success:
         # All published successfully!
-        context.user_data.pop("bulk_questions", None)
-        context.user_data.pop("failed_questions", None)
+        from app.bot.handlers.bulk import clear_creation_session
+        clear_creation_session(context, update.effective_user.id if update.effective_user else 0, update.effective_chat.id if update.effective_chat else 0)
 
         success_kb = InlineKeyboardMarkup(
             [

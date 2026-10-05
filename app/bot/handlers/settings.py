@@ -16,13 +16,12 @@ from app.database.repositories import (
     update_quiz_set_settings,
 )
 from app.parser.models import QuizSettings
-from app.services.session_service import SessionManager
+from app.services.session_service import session_manager
 from app.services.telegram_service import TelegramService
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 telegram_service = TelegramService()
-session_manager = SessionManager()
 
 TIMER_CYCLES = [None, 15, 30, 45, 60]
 CONFIG_TIMER_CYCLES = [None, 15, 30, 45, 60, 120]
@@ -510,11 +509,9 @@ async def finish_creation_settings_callback(update: Update, context: ContextType
         with SessionLocal() as db:
             update_quiz_set_settings(db, quiz_set_id, settings)
 
-    # Discard creation session from session_manager
-    session_manager.discard_session(user_id, chat_id)
-    context.user_data.pop("active_session_id", None)
-    context.user_data.pop("bulk_questions", None)
-    context.user_data.pop("quiz_settings", None)
+    # Discard creation session from session_manager and clear user_data
+    from app.bot.handlers.bulk import clear_creation_session
+    clear_creation_session(context, user_id, chat_id)
 
     # Show Quiz Details Card
     from app.bot.handlers.myquizzes import view_quiz_callback

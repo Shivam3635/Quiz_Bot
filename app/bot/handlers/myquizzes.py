@@ -169,6 +169,11 @@ async def view_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode=ParseMode.HTML,
         )
 
+    # Clean up creation session if coming from creation flow
+    if context.user_data.get("saved_quiz_set_id") or context.user_data.get("quiz_settings"):
+        from app.bot.handlers.bulk import clear_creation_session
+        clear_creation_session(context, user_id, update.effective_chat.id if update.effective_chat else 0)
+
     return ConversationHandler.END
 
 

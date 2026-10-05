@@ -2,6 +2,7 @@
 
 from app.bot.handlers.bulk import (
     cancel_quiz_creation,
+    clear_creation_session,
     continue_session_callback,
     creation_timer_callback,
     discard_and_restart_callback,
@@ -96,6 +97,7 @@ __all__ = [
     "continue_session_callback",
     "discard_and_restart_callback",
     "cancel_quiz_creation",
+    "clear_creation_session",
     "settings_callback",
     "prompt_set_title_callback",
     "prompt_set_desc_callback",

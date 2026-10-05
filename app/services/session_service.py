@@ -121,3 +121,8 @@ class SessionManager:
             del self._sessions[key]
             return True
         return False
+
+
+# Global singleton instance for shared session tracking
+session_manager = SessionManager()
+
