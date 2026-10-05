@@ -70,10 +70,10 @@ class QuizSettings(BaseModel):
     title: Optional[str] = Field(default=None, description="Optional title/name of the quiz batch")
     description: Optional[str] = Field(default=None, description="Optional description of the quiz batch")
     header_banner_enabled: bool = Field(default=True, description="Whether to send a header banner before the quiz starts")
-    is_anonymous: bool = Field(default=True, description="Whether poll is anonymous")
+    is_anonymous: bool = Field(default=False, description="Whether poll is anonymous")
     shuffle_options: bool = Field(default=False, description="Whether options are shuffled (where supported)")
     explanation_enabled: bool = Field(default=True, description="Whether explanations are shown to users")
-    time_limit: Optional[int] = Field(default=None, description="Open period in seconds (e.g. 15, 30, 45, 60)")
+    time_limit: Optional[int] = Field(default=15, description="Open period in seconds (e.g. 15, 30, 45, 60)")
     channel_id: Optional[str] = Field(default=None, description="Target channel username or chat ID")
 
 

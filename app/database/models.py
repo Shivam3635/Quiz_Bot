@@ -89,10 +89,10 @@ class QuizSettingsRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     quiz_set_id = Column(Integer, ForeignKey("quiz_sets.id"), nullable=False, unique=True)
-    is_anonymous = Column(Boolean, default=True)
+    is_anonymous = Column(Boolean, default=False)
     shuffle_options = Column(Boolean, default=False)
     explanation_enabled = Column(Boolean, default=True)
-    time_limit = Column(Integer, nullable=True)
+    time_limit = Column(Integer, default=15, nullable=True)
     channel_id = Column(String(255), nullable=True)
 
     quiz_set = relationship("QuizSet", back_populates="settings")

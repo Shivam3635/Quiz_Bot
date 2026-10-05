@@ -44,6 +44,21 @@ def test_my_quizzes_pagination_buttons():
     assert "my_quizzes_list_0" in callbacks_p1
 
 
+def test_my_quizzes_default_per_page_is_10():
+    """Verify default per_page is 10 for dashboard pagination."""
+    qs_list = [QuizSet(id=i, title=f"Quiz {i}", questions=[]) for i in range(1, 11)]
+    # 10 quizzes with default per_page should be 1 page, no next page button
+    kb = get_my_quizzes_keyboard(qs_list, page=0, total_count=10)
+    callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+    assert "my_quizzes_list_1" not in callbacks
+
+    # 11 quizzes with default per_page should show next page button (Page 1/2)
+    kb_11 = get_my_quizzes_keyboard(qs_list, page=0, total_count=11)
+    callbacks_11 = [btn.callback_data for row in kb_11.inline_keyboard for btn in row]
+    assert "my_quizzes_list_1" in callbacks_11
+
+
+
 def test_quiz_details_and_republish_keyboards():
     """Verify controls for quiz details and 1-click re-publishing."""
     details_kb = get_quiz_details_keyboard(42)

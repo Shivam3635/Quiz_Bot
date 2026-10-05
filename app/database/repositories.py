@@ -183,10 +183,10 @@ def reconstruct_quiz_data(quiz_set: QuizSet) -> tuple[list[QuizQuestion], QuizSe
     settings = QuizSettings(
         title=quiz_set.title,
         description=quiz_set.description,
-        is_anonymous=rec.is_anonymous if rec else True,
+        is_anonymous=rec.is_anonymous if rec else False,
         shuffle_options=rec.shuffle_options if rec else False,
         explanation_enabled=rec.explanation_enabled if rec else True,
-        time_limit=rec.time_limit if rec else None,
+        time_limit=rec.time_limit if (rec and rec.time_limit is not None) else 15,
         channel_id=rec.channel_id if rec else None,
         header_banner_enabled=True,
     )

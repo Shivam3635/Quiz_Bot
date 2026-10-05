@@ -632,7 +632,7 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
     if not result.validation.is_valid:
         session.status = "PREVIEW"
         questions = result.raw_batch.questions
-        settings = QuizSettings()
+        settings = context.user_data.get("quiz_settings") or QuizSettings()
 
         context.user_data["bulk_questions"] = questions
         context.user_data["quiz_settings"] = settings

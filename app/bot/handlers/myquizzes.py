@@ -29,7 +29,7 @@ logger = setup_logger(__name__)
 publishing_service = PublishingService()
 telegram_service = TelegramService()
 
-PER_PAGE = 5
+PER_PAGE = 10
 
 
 async def my_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

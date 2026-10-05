@@ -11,10 +11,10 @@ def test_default_quiz_settings():
     assert settings.title is None
     assert settings.description is None
     assert settings.header_banner_enabled is True
-    assert settings.is_anonymous is True
+    assert settings.is_anonymous is False
     assert settings.shuffle_options is False
     assert settings.explanation_enabled is True
-    assert settings.time_limit is None
+    assert settings.time_limit == 15
     assert settings.channel_id is None
 
 

@@ -8,7 +8,7 @@ def get_my_quizzes_keyboard(
     quiz_sets: list[QuizSet],
     page: int = 0,
     total_count: int = 0,
-    per_page: int = 5,
+    per_page: int = 10,
 ) -> InlineKeyboardMarkup:
     """Generate interactive keyboard listing user's saved quiz sets with pagination."""
     keyboard: list[list[InlineKeyboardButton]] = []
