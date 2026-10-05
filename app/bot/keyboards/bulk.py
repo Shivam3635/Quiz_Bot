@@ -51,19 +51,33 @@ def get_session_conflict_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def get_parse_error_keyboard() -> InlineKeyboardMarkup:
+def get_parse_error_keyboard(
+    first_error_q: int | None = None,
+    valid_count: int = 0,
+) -> InlineKeyboardMarkup:
     """Return options when parsing a combined quiz fails."""
-    return InlineKeyboardMarkup(
+    rows = []
+    if first_error_q is not None and valid_count > 0:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"🗑️ Drop Question {first_error_q} (Keep {valid_count} Valid)",
+                    callback_data=f"drop_broken_q_{first_error_q}",
+                )
+            ]
+        )
+    rows.append(
         [
-            [
-                InlineKeyboardButton("✏️ Add More Parts / Fix", callback_data="multipart_continue"),
-            ],
-            [
-                InlineKeyboardButton("🔄 Discard & Start Again", callback_data="multipart_discard"),
-                InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
-            ],
+            InlineKeyboardButton("➕ Send More Parts", callback_data="multipart_continue"),
+            InlineKeyboardButton("🔄 Discard & Start Again", callback_data="multipart_discard"),
         ]
     )
+    rows.append(
+        [
+            InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
 
 
 def get_validation_error_keyboard(

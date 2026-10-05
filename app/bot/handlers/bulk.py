@@ -49,6 +49,9 @@ def clear_creation_session(context: ContextTypes.DEFAULT_TYPE, user_id: int, cha
     context.user_data.pop("waiting_for_title_text", None)
     context.user_data.pop("waiting_for_desc_text", None)
     context.user_data.pop("waiting_for_channel_text", None)
+    context.user_data.pop("fixing_question_number", None)
+    context.user_data.pop("pending_error_q_nums", None)
+    context.user_data.pop("parsed_valid_questions", None)
 
 
 def format_bulk_prompt_message(settings: QuizSettings) -> str:
@@ -295,6 +298,167 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
         )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
+    # Check if user is responding to fix a specific broken question
+    fixing_q_num = context.user_data.get("fixing_question_number")
+    if fixing_q_num is not None:
+        valid_questions: list[QuizQuestion] = context.user_data.setdefault("parsed_valid_questions", [])
+        parsed = fast_parser.parse(raw_text)
+        if parsed.has_errors or not parsed.questions:
+            first_err = parsed.errors[0] if parsed.errors else None
+            err_msg = first_err.message if first_err else "Could not detect options or answer."
+            await update.message.reply_text(
+                f"⚠️ <b>Question {fixing_q_num} still has an issue:</b> {err_msg}\n\n"
+                f"Please send the complete question again with options (A, B, C, D) and answer (e.g. marked with ✅):\n\n"
+                f"<code>Q{fixing_q_num}. Question text?\n"
+                "A. Option 1\n"
+                "B. Option 2 ✅\n"
+                "C. Option 3\n"
+                "D. Option 4</code>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_parse_error_keyboard(
+                    first_error_q=fixing_q_num,
+                    valid_count=len(valid_questions),
+                ),
+            )
+            return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+        # Successfully parsed fixed question!
+        fixed_q = parsed.questions[0]
+        if fixed_q.question_number is None or len(parsed.questions) == 1:
+            fixed_q.question_number = fixing_q_num
+        if not fixed_q.raw_prefix:
+            fixed_q.raw_prefix = f"Q{fixed_q.question_number}."
+
+        # Replace or insert into valid_questions
+        replaced = False
+        for idx, existing_q in enumerate(valid_questions):
+            if existing_q.question_number == fixed_q.question_number:
+                valid_questions[idx] = fixed_q
+                replaced = True
+                break
+        if not replaced:
+            valid_questions.append(fixed_q)
+            valid_questions.sort(key=lambda q: q.question_number or 9999)
+
+        context.user_data["parsed_valid_questions"] = valid_questions
+        session.add_part(raw_text, detected_questions=len(parsed.questions))
+
+        pending_q_nums: list[int] = context.user_data.get("pending_error_q_nums") or []
+        if fixing_q_num in pending_q_nums:
+            pending_q_nums.remove(fixing_q_num)
+        context.user_data["pending_error_q_nums"] = pending_q_nums
+
+        if pending_q_nums:
+            next_error_q = pending_q_nums[0]
+            context.user_data["fixing_question_number"] = next_error_q
+            await update.message.reply_text(
+                f"✅ <b>Question {fixing_q_num} fixed successfully!</b>\n\n"
+                f"👉 <b>Next, please send Question {next_error_q} again with its complete text, options, and answer:</b>\n\n"
+                f"<code>Q{next_error_q}. Question text?\n"
+                "A. Option 1\n"
+                "B. Option 2 ✅\n"
+                "C. Option 3\n"
+                "D. Option 4</code>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_parse_error_keyboard(
+                    first_error_q=next_error_q,
+                    valid_count=len(valid_questions),
+                ),
+            )
+            return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+        # All parsing issues resolved!
+        context.user_data.pop("fixing_question_number", None)
+        context.user_data.pop("pending_error_q_nums", None)
+        context.user_data.pop("parsed_valid_questions", None)
+
+        for idx, q in enumerate(valid_questions, start=1):
+            q.question_number = idx
+            if q.raw_prefix:
+                q.raw_prefix = f"Q{idx}."
+
+        validation_result = quiz_service.validator.validate_batch(valid_questions, allow_extended_options=True)
+        if not validation_result.is_valid:
+            session.status = "PREVIEW"
+            settings = context.user_data.get("quiz_settings") or QuizSettings()
+            context.user_data["bulk_questions"] = valid_questions
+            context.user_data["quiz_settings"] = settings
+            first_invalid_idx = (
+                validation_result.failed_question_indices[0]
+                if validation_result.failed_question_indices
+                else 1
+            )
+            context.user_data["preview_index"] = max(0, first_invalid_idx - 1)
+            custom_footer = (
+                "💡 <i>You can fix these questions right now using the in-app editor,\n"
+                "drop the invalid ones, or send additional parts:</i>"
+            )
+            report = validation_result.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
+            unique_failed = len(validation_result.failed_question_indices)
+            msg_text = (
+                f"❌ <b>Validation Notice</b>\n\n"
+                f"• Parts combined: <b>{session.total_parts}</b>\n"
+                f"• Total questions: <b>{validation_result.total_questions}</b>\n"
+                f"• Issues needing fix: <b>{validation_result.error_count}</b>\n\n"
+                f"{report}"
+            )
+            val_keyboard = get_validation_error_keyboard(
+                first_invalid_idx=first_invalid_idx,
+                total_valid=validation_result.valid_count,
+                total_invalid=unique_failed,
+            )
+            await update.message.reply_text(
+                msg_text,
+                reply_markup=val_keyboard,
+                parse_mode=ParseMode.HTML,
+            )
+            return QuizCreationState.PREVIEWING
+
+        # All parts parsed and validated
+        session.status = "COMPLETED"
+        settings = context.user_data.get("quiz_settings") or QuizSettings()
+        context.user_data["bulk_questions"] = valid_questions
+        context.user_data["quiz_settings"] = settings
+        context.user_data["preview_index"] = 0
+
+        saved_quiz_set_id = None
+        try:
+            with SessionLocal() as db:
+                user_rec = get_or_create_user(
+                    db,
+                    telegram_id=user_id,
+                    username=update.effective_user.username if update.effective_user else None,
+                )
+                quiz_set = save_quiz_batch(
+                    db=db,
+                    user_id=user_rec.id,
+                    title=settings.title,
+                    description=settings.description,
+                    questions=valid_questions,
+                    settings=settings,
+                )
+                saved_quiz_set_id = quiz_set.id
+                context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
+                logger.info("Successfully persisted quiz set %d after in-line question fix", saved_quiz_set_id)
+        except Exception as db_err:
+            logger.exception("Failed to save quiz batch after fix: %s", db_err)
+
+        from app.bot.keyboards.settings import get_quiz_settings_config_keyboard
+        from app.bot.handlers.settings import format_quiz_settings_text
+
+        settings_text = (
+            f"🎉 <b>Question {fixing_q_num} fixed! All {len(valid_questions)} questions are now valid!</b>\n\n"
+            + format_quiz_settings_text(settings, q_count=len(valid_questions))
+        )
+        settings_kb = get_quiz_settings_config_keyboard(settings, quiz_set_id=saved_quiz_set_id)
+
+        await update.message.reply_text(
+            settings_text,
+            reply_markup=settings_kb,
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.CONFIGURING_SETTINGS
+
     # 3. Detect questions in this chunk
     parsed = fast_parser.parse(raw_text)
     detected_count = len(parsed.questions)
@@ -414,6 +578,19 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
     # Case 1: Parsing errors
     if result.raw_batch.has_errors:
         session.status = "WAITING_FOR_INPUT"
+        valid_questions = result.raw_batch.questions
+        context.user_data["parsed_valid_questions"] = valid_questions
+
+        # Extract question numbers with errors
+        error_q_nums = [
+            err.question_number
+            for err in result.raw_batch.errors
+            if err.question_number is not None
+        ]
+        context.user_data["pending_error_q_nums"] = error_q_nums
+        first_error_q = error_q_nums[0] if error_q_nums else None
+        context.user_data["fixing_question_number"] = first_error_q
+
         err_lines = [
             "❌ <b>Quiz processing encountered issues.</b>\n",
             f"Parts combined: <b>{session.total_parts}</b>",
@@ -425,12 +602,28 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
             q_label = f"Question {err.question_number}" if err.question_number else "Question"
             err_lines.append(f"• <b>{q_label}</b>: {err.message}")
 
-        err_lines.append("\nYou can send more parts to fix, or discard and start again:")
+        if first_error_q is not None:
+            err_lines.append(
+                f"\n👉 <b>Please send Question {first_error_q} again below with its complete question text, options (A, B, C, D), and correct answer:</b>\n\n"
+                f"<code>Q{first_error_q}. Question text?\n"
+                "A. Option 1\n"
+                "B. Option 2 ✅\n"
+                "C. Option 3\n"
+                "D. Option 4</code>\n\n"
+                f"<i>Or tap below to drop Question {first_error_q} and keep the {result.raw_batch.valid_count} valid questions:</i>"
+            )
+        else:
+            err_lines.append(
+                "\n👉 <b>Please send the complete question again below with its text, options (A, B, C, D), and correct answer:</b>"
+            )
 
         if status_msg:
             await status_msg.edit_text(
                 "\n".join(err_lines),
-                reply_markup=get_parse_error_keyboard(),
+                reply_markup=get_parse_error_keyboard(
+                    first_error_q=first_error_q,
+                    valid_count=result.raw_batch.valid_count,
+                ),
                 parse_mode=ParseMode.HTML,
             )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
@@ -530,6 +723,166 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
             parse_mode=ParseMode.HTML,
         )
 
+    return QuizCreationState.CONFIGURING_SETTINGS
+
+
+async def drop_broken_question_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Drop a broken question from parse errors and continue with valid questions."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    dropped_q_num = None
+    if query and query.data and query.data.startswith("drop_broken_q_"):
+        try:
+            dropped_q_num = int(query.data.split("_")[-1])
+        except ValueError:
+            dropped_q_num = None
+
+    valid_questions: list[QuizQuestion] = context.user_data.get("parsed_valid_questions") or []
+    pending_q_nums: list[int] = context.user_data.get("pending_error_q_nums") or []
+
+    if dropped_q_num is not None:
+        if dropped_q_num in pending_q_nums:
+            pending_q_nums.remove(dropped_q_num)
+        context.user_data["pending_error_q_nums"] = pending_q_nums
+        valid_questions = [q for q in valid_questions if q.question_number != dropped_q_num]
+        context.user_data["parsed_valid_questions"] = valid_questions
+
+    # If there are still pending broken questions to fix:
+    if pending_q_nums:
+        next_error_q = pending_q_nums[0]
+        context.user_data["fixing_question_number"] = next_error_q
+        drop_notice = f"🗑️ <b>Dropped Question {dropped_q_num}.</b>\n\n" if dropped_q_num else ""
+        text = (
+            f"{drop_notice}"
+            f"👉 <b>Next, please send Question {next_error_q} again with its complete text, options, and answer:</b>\n\n"
+            f"<code>Q{next_error_q}. Question text?\n"
+            "A. Option 1\n"
+            "B. Option 2 ✅\n"
+            "C. Option 3\n"
+            "D. Option 4</code>"
+        )
+        if query and query.message:
+            await query.edit_message_text(
+                text,
+                reply_markup=get_parse_error_keyboard(
+                    first_error_q=next_error_q,
+                    valid_count=len(valid_questions),
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    # All broken questions handled (either fixed or dropped)
+    context.user_data.pop("fixing_question_number", None)
+    context.user_data.pop("pending_error_q_nums", None)
+    context.user_data.pop("parsed_valid_questions", None)
+
+    if not valid_questions:
+        msg = (
+            "⚠️ <b>No valid questions remain to create a quiz.</b>\n\n"
+            "Please send your quiz questions again or send /newquiz to start fresh."
+        )
+        if query and query.message:
+            await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    # Renumber sequentially
+    for idx, q in enumerate(valid_questions, start=1):
+        q.question_number = idx
+        if q.raw_prefix:
+            q.raw_prefix = f"Q{idx}."
+
+    validation_result = quiz_service.validator.validate_batch(valid_questions, allow_extended_options=True)
+    user_id = update.effective_user.id if update.effective_user else 0
+    chat_id = update.effective_chat.id if update.effective_chat else 0
+    session = session_manager.get_active_session(user_id, chat_id)
+
+    if not validation_result.is_valid:
+        if session:
+            session.status = "PREVIEW"
+
+        settings = context.user_data.get("quiz_settings") or QuizSettings()
+        context.user_data["bulk_questions"] = valid_questions
+        context.user_data["quiz_settings"] = settings
+        first_invalid_idx = (
+            validation_result.failed_question_indices[0]
+            if validation_result.failed_question_indices
+            else 1
+        )
+        context.user_data["preview_index"] = max(0, first_invalid_idx - 1)
+        custom_footer = (
+            "💡 <i>You can fix these questions right now using the in-app editor,\n"
+            "drop the invalid ones, or send additional parts:</i>"
+        )
+        report = validation_result.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
+        unique_failed = len(validation_result.failed_question_indices)
+        msg_text = (
+            f"❌ <b>Validation Notice</b>\n\n"
+            f"• Total questions: <b>{validation_result.total_questions}</b>\n"
+            f"• Issues needing fix: <b>{validation_result.error_count}</b>\n\n"
+            f"{report}"
+        )
+        val_keyboard = get_validation_error_keyboard(
+            first_invalid_idx=first_invalid_idx,
+            total_valid=validation_result.valid_count,
+            total_invalid=unique_failed,
+        )
+        if query and query.message:
+            await query.edit_message_text(
+                msg_text,
+                reply_markup=val_keyboard,
+                parse_mode=ParseMode.HTML,
+            )
+        return QuizCreationState.PREVIEWING
+
+    # All valid! Save to DB & proceed to settings
+    if session:
+        session.status = "COMPLETED"
+
+    settings = context.user_data.get("quiz_settings") or QuizSettings()
+    context.user_data["bulk_questions"] = valid_questions
+    context.user_data["quiz_settings"] = settings
+    context.user_data["preview_index"] = 0
+
+    saved_quiz_set_id = None
+    try:
+        with SessionLocal() as db:
+            user_rec = get_or_create_user(
+                db,
+                telegram_id=user_id,
+                username=update.effective_user.username if update.effective_user else None,
+            )
+            quiz_set = save_quiz_batch(
+                db=db,
+                user_id=user_rec.id,
+                title=settings.title,
+                description=settings.description,
+                questions=valid_questions,
+                settings=settings,
+            )
+            saved_quiz_set_id = quiz_set.id
+            context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
+            logger.info("Successfully persisted quiz set %d after dropping broken question", saved_quiz_set_id)
+    except Exception as db_err:
+        logger.exception("Failed to save quiz batch after drop: %s", db_err)
+
+    from app.bot.keyboards.settings import get_quiz_settings_config_keyboard
+    from app.bot.handlers.settings import format_quiz_settings_text
+
+    settings_text = (
+        f"🗑️ <b>Dropped broken question(s). All {len(valid_questions)} remaining questions are valid!</b>\n\n"
+        + format_quiz_settings_text(settings, q_count=len(valid_questions))
+    )
+    settings_kb = get_quiz_settings_config_keyboard(settings, quiz_set_id=saved_quiz_set_id)
+
+    if query and query.message:
+        await query.edit_message_text(
+            settings_text,
+            reply_markup=settings_kb,
+            parse_mode=ParseMode.HTML,
+        )
     return QuizCreationState.CONFIGURING_SETTINGS
 
 

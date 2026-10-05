@@ -183,7 +183,20 @@ class QuizBotProParser:
         if current is not None:
             drafts.append(current)
 
-        return drafts
+        # Consolidate drafts: if a draft with the same q_num appears later
+        # (e.g. user re-sent a corrected question), replace the earlier draft
+        consolidated: list[_DraftBlock] = []
+        q_num_map: dict[int, int] = {}
+
+        for d in drafts:
+            if d.q_num in q_num_map:
+                existing_idx = q_num_map[d.q_num]
+                consolidated[existing_idx] = d
+            else:
+                q_num_map[d.q_num] = len(consolidated)
+                consolidated.append(d)
+
+        return consolidated
 
     def _convert_draft_to_question(
         self, draft: _DraftBlock
