@@ -17,12 +17,14 @@ from app.database.repositories import get_or_create_user, save_quiz_batch
 from app.parser.models import QuizSettings
 from app.parser.parser import QuizBotProParser
 from app.services.quiz_service import QuizService
+from app.extractors.sheet_extractor import SheetExtractor
 from app.services.session_service import session_manager
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 quiz_service = QuizService()
 fast_parser = QuizBotProParser()
+sheet_extractor = SheetExtractor()
 
 TITLE_PROMPT_MESSAGE = (
     "✨ <b>Let's create a new quiz!</b>\n\n"
@@ -189,7 +191,7 @@ async def receive_quiz_desc_message(update: Update, context: ContextTypes.DEFAUL
     session = session_manager.create_session(user_id, chat_id)
     context.user_data["active_session_id"] = session.session_id
 
-    prompt_text = "👍 Good! Now send your quiz questions."
+    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel/CSV file)."
     await update.message.reply_text(
         prompt_text,
         parse_mode=ParseMode.HTML,
@@ -213,7 +215,7 @@ async def skip_quiz_desc_callback(update: Update, context: ContextTypes.DEFAULT_
     session = session_manager.create_session(user_id, chat_id)
     context.user_data["active_session_id"] = session.session_id
 
-    prompt_text = "👍 Good! Now send your quiz questions."
+    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel/CSV file)."
     if query and query.message:
         await query.edit_message_text(
             prompt_text,
@@ -500,6 +502,135 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
     )
     context.user_data["last_part_status_msg_id"] = sent_msg.message_id
 
+    return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+
+async def receive_quiz_document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle incoming document uploads (Excel .xlsx, CSV, etc.) during quiz creation."""
+    if not update.message or not update.message.document:
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    user_id = update.effective_user.id if update.effective_user else 0
+    chat_id = update.effective_chat.id if update.effective_chat else 0
+    doc = update.message.document
+    filename = doc.file_name or "document"
+    file_size = doc.file_size or 0
+    lower_name = filename.lower()
+
+    # 1. Check file size limit (Telegram Bot API limit is 20MB)
+    MAX_FILE_BYTES = 20 * 1024 * 1024
+    if file_size > MAX_FILE_BYTES:
+        await update.message.reply_text(
+            f"⚠️ <b>File too large:</b> {html.escape(filename)} is {file_size // (1024 * 1024)}MB.\n"
+            "Telegram Bot API supports files up to 20MB. Please upload a smaller file.",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    # 2. Check supported extensions
+    supported_sheets = (".xlsx", ".xlsm", ".csv")
+    upcoming_docs = (".docx", ".doc", ".pdf")
+
+    if lower_name.endswith(upcoming_docs):
+        await update.message.reply_text(
+            f"📄 <b>Document detected:</b> <code>{html.escape(filename)}</code>\n\n"
+            "Word (.docx) and PDF support is rolling out in Phase 2 & 3!\n"
+            "Currently active: <b>Excel (.xlsx) and CSV (.csv)</b> spreadsheets.\n\n"
+            "<i>💡 Tip: You can save your document as Excel/CSV, or type /template to get our ready-to-use template!</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    if not lower_name.endswith(supported_sheets):
+        await update.message.reply_text(
+            f"⚠️ <b>Unsupported file format:</b> <code>{html.escape(filename)}</code>\n\n"
+            "Please upload an <b>Excel sheet</b> (<code>.xlsx</code>) or <b>CSV file</b> (<code>.csv</code>), "
+            "or type /template to download a ready-to-use spreadsheet template.",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    # 3. Retrieve or create session
+    session = session_manager.get_active_session(user_id, chat_id)
+    if not session:
+        session = session_manager.create_session(user_id, chat_id)
+        context.user_data["active_session_id"] = session.session_id
+
+    # Check lock
+    if session.is_processing_lock or session.status == "PROCESSING":
+        await update.message.reply_text(
+            "⏳ <i>Your quiz is currently being processed. Please wait for the current operation to finish.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    # 4. Status message
+    status_msg = await update.message.reply_text(
+        f"⏳ <b>Reading document:</b> <code>{html.escape(filename)}</code>\n\n"
+        "<i>Downloading file and extracting quiz questions...</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+    # 5. Download and extract
+    try:
+        tg_file = await doc.get_file()
+        file_bytes = await tg_file.download_as_bytearray()
+        extract_result = sheet_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
+    except Exception as exc:
+        logger.exception("Error extracting from document %s: %s", filename, exc)
+        await status_msg.edit_text(
+            f"❌ <b>Extraction error:</b> Failed to read <code>{html.escape(filename)}</code> ({str(exc)}).\n\n"
+            "Please verify the file format and try again.",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    if extract_result.error_message:
+        await status_msg.edit_text(
+            f"❌ <b>Document Issue:</b> {html.escape(extract_result.error_message)}\n\n"
+            "Please ensure your spreadsheet contains columns for Question, Options (A, B, C, D), and Answer (or type /template).",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    raw_text = extract_result.raw_text
+    parsed = fast_parser.parse(raw_text)
+    detected_count = len(parsed.questions)
+
+    if detected_count == 0 and parsed.total_blocks_found == 0:
+        await status_msg.edit_text(
+            f"⚠️ <b>No quiz questions detected in</b> <code>{html.escape(filename)}</code>.\n\n"
+            "Please ensure columns are labeled with Question, Option A, Option B, Option C, Option D, and Answer.",
+            reply_markup=get_multipart_input_keyboard(),
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
+    # Append part to session
+    part = session.add_part(raw_text, detected_questions=detected_count)
+    logger.info(
+        "User %s uploaded document %s (Part %d, %d detected questions, %d chars). Total parts: %d",
+        user_id,
+        filename,
+        part.part_number,
+        part.detected_questions,
+        part.character_count,
+        session.total_parts,
+    )
+
+    success_text = (
+        f"📄 <b>Document Processed:</b> <code>{html.escape(filename)}</code>\n\n"
+        f"• Questions detected: <b>{detected_count}</b>\n"
+        f"• Total session questions: <b>{session.total_questions_detected}</b>\n"
+        f"• Total parts combined: <b>{session.total_parts}</b>\n\n"
+        "<i>Send another file or message with questions, or tap ✅ Done below to finish creating your quiz:</i>"
+    )
+
+    await status_msg.edit_text(
+        success_text,
+        reply_markup=get_multipart_input_keyboard(),
+        parse_mode=ParseMode.HTML,
+    )
     return QuizCreationState.WAITING_FOR_BULK_INPUT
 
 

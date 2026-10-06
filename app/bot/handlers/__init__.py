@@ -9,6 +9,7 @@ from app.bot.handlers.bulk import (
     drop_broken_question_callback,
     multipart_done_callback,
     receive_quiz_desc_message,
+    receive_quiz_document_message,
     receive_quiz_part_message,
     receive_quiz_title_message,
     skip_quiz_desc_callback,
@@ -16,7 +17,7 @@ from app.bot.handlers.bulk import (
     start_quiz_session_flow,
 )
 from app.bot.handlers.common import coming_soon_callback
-from app.bot.handlers.help import help_command
+from app.bot.handlers.help import help_command, template_command
 from app.bot.handlers.preview import (
     confirm_delete_question_callback,
     delete_question_prompt_callback,
@@ -86,6 +87,7 @@ from app.bot.handlers.start import start_command
 __all__ = [
     "start_command",
     "help_command",
+    "template_command",
     "coming_soon_callback",
     "start_quiz_session_flow",
     "receive_quiz_title_message",
@@ -93,6 +95,7 @@ __all__ = [
     "receive_quiz_desc_message",
     "skip_quiz_desc_callback",
     "receive_quiz_part_message",
+    "receive_quiz_document_message",
     "multipart_done_callback",
     "creation_timer_callback",
     "continue_session_callback",

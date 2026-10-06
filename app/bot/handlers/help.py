@@ -45,6 +45,7 @@ HELP_MESSAGE = (
     "• /startquiz - Launch a live group quiz battle\n"
     "• /stopquiz - Stop an active group quiz battle\n"
     "• /cancel - Cancel current session\n"
+    "• /template - Download sample Excel spreadsheet template\n"
     "• /help - Show this guide\n\n"
     "💡 <i>Tip: Ensure this bot is an Admin with 'Post Messages' rights in your target channel.</i>"
 )
@@ -72,3 +73,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         except Exception as e:
             logger.debug("Minor edit text exception: %s", e)
+
+
+async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send ready-to-use sample Excel spreadsheet template (.xlsx)."""
+    if not update.effective_chat:
+        return
+
+    from app.extractors.sheet_extractor import generate_quiz_template_bytes
+
+    buf_bytes = generate_quiz_template_bytes()
+    caption = (
+        "📥 <b>QuizBotPro Spreadsheet Template</b>\n\n"
+        "Fill your quiz questions into this Excel sheet and upload it directly to QuizBotPro!\n\n"
+        "<b>Supported Columns:</b>\n"
+        "• <b>Question:</b> Question text (supports bilingual Hindi/English)\n"
+        "• <b>Option A - D:</b> Answer choices\n"
+        "• <b>Answer:</b> Correct option letter (e.g. <code>A</code>, <code>B</code>, <code>C</code>, <code>D</code>)\n"
+        "• <b>Explanation:</b> Optional explanation\n\n"
+        "<i>💡 Tip: You can also upload CSV files (.csv) formatted the same way!</i>"
+    )
+
+    await context.bot.send_document(
+        chat_id=update.effective_chat.id,
+        document=buf_bytes,
+        filename="quiz_template.xlsx",
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+    )

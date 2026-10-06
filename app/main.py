@@ -66,6 +66,7 @@ from app.bot.handlers import (
     receive_channel_dest_message,
     receive_question_edit_message,
     receive_quiz_desc_message,
+    receive_quiz_document_message,
     receive_quiz_part_message,
     receive_quiz_title_message,
     receive_republish_dest_message,
@@ -84,6 +85,7 @@ from app.bot.handlers import (
     start_quiz_session_flow,
     startquiz_command,
     stopquiz_command,
+    template_command,
     toggle_anonymous_callback,
     toggle_explanation_callback,
     toggle_header_banner_callback,
@@ -107,6 +109,7 @@ async def post_init(application: Application) -> None:
         BotCommand("startquiz", "Launch a live group quiz battle"),
         BotCommand("stopquiz", "Stop active group quiz battle"),
         BotCommand("bulk", "Multi-part bulk quiz creation"),
+        BotCommand("template", "Download Excel (.xlsx) quiz spreadsheet template"),
         BotCommand("help", "Formatting guide and instructions"),
         BotCommand("cancel", "Cancel current creation session"),
     ]
@@ -164,6 +167,7 @@ def create_bot_app() -> Application:
                 CallbackQueryHandler(fix_invalid_question_callback, pattern="^fix_invalid_q_\\d+$"),
                 CallbackQueryHandler(drop_invalid_questions_callback, pattern="^drop_invalid_questions$"),
                 CallbackQueryHandler(preview_callback, pattern="^goto_preview$"),
+                MessageHandler(filters.Document.ALL, receive_quiz_document_message),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_quiz_part_message),
             ],
             QuizCreationState.CONFIGURING_SETTINGS: [
@@ -236,6 +240,7 @@ def create_bot_app() -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("newquiz", start_quiz_session_flow))
     application.add_handler(CommandHandler("myquizzes", my_quizzes_command))
+    application.add_handler(CommandHandler("template", template_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("startquiz", startquiz_command))
     application.add_handler(CommandHandler("stopquiz", stopquiz_command))
