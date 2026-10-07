@@ -17,7 +17,7 @@ from app.database.repositories import get_or_create_user, save_quiz_batch
 from app.parser.models import QuizSettings
 from app.parser.parser import QuizBotProParser
 from app.services.quiz_service import QuizService
-from app.extractors.sheet_extractor import SheetExtractor
+from app.extractors import SheetExtractor, DocxExtractor
 from app.services.session_service import session_manager
 from app.utils.logger import setup_logger
 
@@ -25,6 +25,7 @@ logger = setup_logger(__name__)
 quiz_service = QuizService()
 fast_parser = QuizBotProParser()
 sheet_extractor = SheetExtractor()
+docx_extractor = DocxExtractor()
 
 TITLE_PROMPT_MESSAGE = (
     "✨ <b>Let's create a new quiz!</b>\n\n"
@@ -191,7 +192,7 @@ async def receive_quiz_desc_message(update: Update, context: ContextTypes.DEFAUL
     session = session_manager.create_session(user_id, chat_id)
     context.user_data["active_session_id"] = session.session_id
 
-    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel/CSV file)."
+    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel, CSV, or Word document)."
     await update.message.reply_text(
         prompt_text,
         parse_mode=ParseMode.HTML,
@@ -215,7 +216,7 @@ async def skip_quiz_desc_callback(update: Update, context: ContextTypes.DEFAULT_
     session = session_manager.create_session(user_id, chat_id)
     context.user_data["active_session_id"] = session.session_id
 
-    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel/CSV file)."
+    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel, CSV, or Word document)."
     if query and query.message:
         await query.edit_message_text(
             prompt_text,
@@ -529,23 +530,24 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
 
     # 2. Check supported extensions
     supported_sheets = (".xlsx", ".xlsm", ".csv")
-    upcoming_docs = (".docx", ".doc", ".pdf")
+    supported_docs = (".docx",)
+    upcoming_docs = (".doc", ".pdf")
 
     if lower_name.endswith(upcoming_docs):
         await update.message.reply_text(
             f"📄 <b>Document detected:</b> <code>{html.escape(filename)}</code>\n\n"
-            "Word (.docx) and PDF support is rolling out in Phase 2 & 3!\n"
-            "Currently active: <b>Excel (.xlsx) and CSV (.csv)</b> spreadsheets.\n\n"
-            "<i>💡 Tip: You can save your document as Excel/CSV, or type /template to get our ready-to-use template!</i>",
+            "PDF support is rolling out in Phase 3!\n"
+            "Currently active: <b>Excel (.xlsx), CSV (.csv), and Word (.docx)</b> documents.\n\n"
+            "<i>💡 Tip: You can save your document as Word (.docx), Excel, or CSV, or type /template to get our spreadsheet template!</i>",
             parse_mode=ParseMode.HTML,
         )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
-    if not lower_name.endswith(supported_sheets):
+    if not lower_name.endswith(supported_sheets + supported_docs):
         await update.message.reply_text(
             f"⚠️ <b>Unsupported file format:</b> <code>{html.escape(filename)}</code>\n\n"
-            "Please upload an <b>Excel sheet</b> (<code>.xlsx</code>) or <b>CSV file</b> (<code>.csv</code>), "
-            "or type /template to download a ready-to-use spreadsheet template.",
+            "Please upload a <b>Word document</b> (<code>.docx</code>), <b>Excel sheet</b> (<code>.xlsx</code>), "
+            "or <b>CSV file</b> (<code>.csv</code>), or type /template to download a spreadsheet template.",
             parse_mode=ParseMode.HTML,
         )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
@@ -575,7 +577,10 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
     try:
         tg_file = await doc.get_file()
         file_bytes = await tg_file.download_as_bytearray()
-        extract_result = sheet_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
+        if lower_name.endswith(supported_docs):
+            extract_result = docx_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
+        else:
+            extract_result = sheet_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
     except Exception as exc:
         logger.exception("Error extracting from document %s: %s", filename, exc)
         await status_msg.edit_text(

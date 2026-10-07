@@ -2,11 +2,13 @@
 
 from app.extractors.base import BaseExtractor, ExtractedQuestion, ExtractionResult
 from app.extractors.sheet_extractor import SheetExtractor, generate_quiz_template_bytes
+from app.extractors.docx_extractor import DocxExtractor
 
 __all__ = [
     "BaseExtractor",
     "ExtractedQuestion",
     "ExtractionResult",
     "SheetExtractor",
+    "DocxExtractor",
     "generate_quiz_template_bytes",
 ]
