@@ -7,6 +7,7 @@ import pypdf
 
 from app.extractors.base import BaseExtractor, ExtractedQuestion, ExtractionResult
 from app.parser.parser import BulkQuizParser
+from app.utils.devanagari_cleaner import clean_devanagari_text
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -61,7 +62,8 @@ class PdfExtractor(BaseExtractor):
         extracted_page_lines: list[str] = []
         for p_idx, page in enumerate(reader.pages, start=1):
             try:
-                page_text = page.extract_text() or ""
+                raw_extracted = page.extract_text() or ""
+                page_text = clean_devanagari_text(raw_extracted)
             except Exception as page_err:
                 logger.warning("Error extracting text from page %d of %s: %s", p_idx, filename, page_err)
                 continue

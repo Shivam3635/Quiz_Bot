@@ -4,6 +4,7 @@ import re
 from typing import Optional
 from dataclasses import dataclass, field
 from app.parser.models import ParsedBatch, ParseError, QuizQuestion
+from app.utils.devanagari_cleaner import clean_devanagari_text
 from app.utils.helpers import format_bilingual_question_text
 from app.utils.logger import setup_logger
 
@@ -72,7 +73,8 @@ class QuizBotProParser:
         if not raw_text or not raw_text.strip():
             return ParsedBatch(total_blocks_found=0)
 
-        lines = [line.strip() for line in raw_text.splitlines()]
+        cleaned_raw = clean_devanagari_text(raw_text)
+        lines = [line.strip() for line in cleaned_raw.splitlines()]
         drafts = self._collect_draft_blocks(lines)
 
         logger.info("Found %d draft question block(s) to process", len(drafts))

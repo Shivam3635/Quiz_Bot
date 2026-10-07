@@ -7,6 +7,7 @@ from typing import Optional
 import openpyxl
 
 from app.extractors.base import BaseExtractor, ExtractedQuestion, ExtractionResult
+from app.utils.devanagari_cleaner import clean_devanagari_text
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -140,7 +141,7 @@ class SheetExtractor(BaseExtractor):
         # Clean rows
         cleaned_rows: list[list[str]] = []
         for row in raw_rows:
-            cleaned = [str(c).strip() for c in row]
+            cleaned = [clean_devanagari_text(str(c).strip()) for c in row]
             while cleaned and cleaned[-1] == "":
                 cleaned.pop()
             if any(cleaned):

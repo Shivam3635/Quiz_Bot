@@ -214,3 +214,32 @@ def test_pdf_bulleted_options_with_unicode_checkmark_and_preamble():
         parse_res = BulkQuizParser().parse(result.to_formatted_text())
         assert not parse_res.has_errors
         assert parse_res.valid_count == 2
+
+
+def test_pdf_distorted_hindi_cleaned():
+    """Verify that distorted Hindi text extracted from PDF is automatically repaired."""
+    page_text = (
+        "Q10. The full form of MPI is: MPI का पूरा नाम क्या है?\n"
+        "• A. Mean Point of Impact (मीन पॉइंट ऑफ इम्पैक्ट) ✓\n"
+        "• B. Main Point of Impact (मुख्य प्रभाव कबंदु)\n"
+        "• C. Mean Point of Infantry (मीन पॉइंट ऑफ इन्फ ैं ट र ी)\n"
+        "• D. Main Position of Infantry (मुख्य स्थिकत इन्फ ैं ट र ी)\n"
+    )
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = page_text
+
+    mock_reader = MagicMock()
+    mock_reader.is_encrypted = False
+    mock_reader.pages = [mock_page]
+
+    with patch("pypdf.PdfReader", return_value=mock_reader):
+        extractor = PdfExtractor()
+        result = extractor.extract(b"%PDF-mock", "NCC_Quiz.pdf")
+
+        assert result.success is True
+        assert len(result.questions) == 1
+        q = result.questions[0]
+        assert "मुख्य प्रभाव बिंदु" in q.options[1]
+        assert "मीन पॉइंट ऑफ इन्फैंट्री" in q.options[2]
+        assert "मुख्य स्थिति इन्फैंट्री" in q.options[3]
+
