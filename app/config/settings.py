@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     MIN_OPTIONS_PER_QUESTION: int = 2
     DEFAULT_DELAY_BETWEEN_POSTS: float = 1.0  # seconds between quiz creations
 
+    # AI & Multimodal OCR (Phase 5)
+    GEMINI_API_KEY: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",

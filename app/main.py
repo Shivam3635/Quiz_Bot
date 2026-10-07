@@ -167,7 +167,7 @@ def create_bot_app() -> Application:
                 CallbackQueryHandler(fix_invalid_question_callback, pattern="^fix_invalid_q_\\d+$"),
                 CallbackQueryHandler(drop_invalid_questions_callback, pattern="^drop_invalid_questions$"),
                 CallbackQueryHandler(preview_callback, pattern="^goto_preview$"),
-                MessageHandler(filters.Document.ALL, receive_quiz_document_message),
+                MessageHandler(filters.Document.ALL | filters.PHOTO, receive_quiz_document_message),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_quiz_part_message),
             ],
             QuizCreationState.CONFIGURING_SETTINGS: [

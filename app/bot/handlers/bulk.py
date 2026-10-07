@@ -17,16 +17,14 @@ from app.database.repositories import get_or_create_user, save_quiz_batch
 from app.parser.models import QuizSettings
 from app.parser.parser import QuizBotProParser
 from app.services.quiz_service import QuizService
-from app.extractors import SheetExtractor, DocxExtractor, PdfExtractor
+from app.extractors import DocumentRouter
 from app.services.session_service import session_manager
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 quiz_service = QuizService()
 fast_parser = QuizBotProParser()
-sheet_extractor = SheetExtractor()
-docx_extractor = DocxExtractor()
-pdf_extractor = PdfExtractor()
+document_router = DocumentRouter()
 
 TITLE_PROMPT_MESSAGE = (
     "✨ <b>Let's create a new quiz!</b>\n\n"
@@ -508,42 +506,14 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
 
 
 async def receive_quiz_document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle incoming document uploads (Excel .xlsx, CSV, etc.) during quiz creation."""
-    if not update.message or not update.message.document:
+    """Handle incoming document or photo uploads (Excel, CSV, Word, PDF, Images, ZIP) during quiz creation."""
+    if not update.message or (not update.message.document and not update.message.photo):
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
     user_id = update.effective_user.id if update.effective_user else 0
     chat_id = update.effective_chat.id if update.effective_chat else 0
-    doc = update.message.document
-    filename = doc.file_name or "document"
-    file_size = doc.file_size or 0
-    lower_name = filename.lower()
 
-    # 1. Check file size limit (Telegram Bot API limit is 20MB)
-    MAX_FILE_BYTES = 20 * 1024 * 1024
-    if file_size > MAX_FILE_BYTES:
-        await update.message.reply_text(
-            f"⚠️ <b>File too large:</b> {html.escape(filename)} is {file_size // (1024 * 1024)}MB.\n"
-            "Telegram Bot API supports files up to 20MB. Please upload a smaller file.",
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    # 2. Check supported extensions
-    supported_sheets = (".xlsx", ".xlsm", ".csv")
-    supported_docs = (".docx",)
-    supported_pdfs = (".pdf",)
-
-    if not lower_name.endswith(supported_sheets + supported_docs + supported_pdfs):
-        await update.message.reply_text(
-            f"⚠️ <b>Unsupported file format:</b> <code>{html.escape(filename)}</code>\n\n"
-            "Please upload a <b>PDF document</b> (<code>.pdf</code>), <b>Word document</b> (<code>.docx</code>), "
-            "<b>Excel sheet</b> (<code>.xlsx</code>), or <b>CSV file</b> (<code>.csv</code>), or type /template to download a spreadsheet template.",
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    # 3. Retrieve or create session
+    # Retrieve or create session
     session = session_manager.get_active_session(user_id, chat_id)
     if not session:
         session = session_manager.create_session(user_id, chat_id)
@@ -557,62 +527,63 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
         )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
-    # 4. Status message
+    # Extract target file
+    is_photo = bool(update.message.photo)
+    if is_photo:
+        photo = update.message.photo[-1]  # Highest resolution
+        filename = f"photo_{photo.file_unique_id}.jpg"
+        file_size = photo.file_size or 0
+    else:
+        doc = update.message.document
+        filename = doc.file_name or "document"
+        file_size = doc.file_size or 0
+
+    # File size validation (20MB)
+    MAX_FILE_BYTES = 20 * 1024 * 1024
+    if file_size > MAX_FILE_BYTES:
+        await update.message.reply_text(
+            f"⚠️ <b>File too large:</b> {html.escape(filename)} is {file_size // (1024 * 1024)}MB.\n"
+            "Telegram Bot API supports files up to 20MB. Please upload a smaller file.",
+            parse_mode=ParseMode.HTML,
+        )
+        return QuizCreationState.WAITING_FOR_BULK_INPUT
+
     status_msg = await update.message.reply_text(
-        f"⏳ <b>Reading document:</b> <code>{html.escape(filename)}</code>\n\n"
-        "<i>Downloading file and extracting quiz questions...</i>",
+        f"⏳ <b>Processing file:</b> <code>{html.escape(filename)}</code>\n\n"
+        "<i>Downloading and parsing quiz questions...</i>",
         parse_mode=ParseMode.HTML,
     )
 
-    # 5. Download and extract
     try:
-        tg_file = await doc.get_file()
+        tg_file = await (update.message.photo[-1].get_file() if is_photo else update.message.document.get_file())
         file_bytes = await tg_file.download_as_bytearray()
-        if lower_name.endswith(supported_pdfs):
-            extract_result = pdf_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
-        elif lower_name.endswith(supported_docs):
-            extract_result = docx_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
-        else:
-            extract_result = sheet_extractor.extract_from_bytes(bytes(file_bytes), filename=filename)
+        summary = document_router.ingest(bytes(file_bytes), filename=filename)
     except Exception as exc:
-        logger.exception("Error extracting from document %s: %s", filename, exc)
+        logger.exception("Error ingesting file %s: %s", filename, exc)
         await status_msg.edit_text(
-            f"❌ <b>Extraction error:</b> Failed to read <code>{html.escape(filename)}</code> ({str(exc)}).\n\n"
-            "Please verify the file format and try again.",
+            f"❌ <b>Processing error:</b> Failed to process <code>{html.escape(filename)}</code> ({str(exc)}).\n\n"
+            "Please check the file and try again.",
             parse_mode=ParseMode.HTML,
         )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
-    if extract_result.error_message:
+    if not summary.success or summary.total_detected == 0:
+        err_text = summary.error_message or "No valid quiz questions could be detected in this file."
         await status_msg.edit_text(
-            f"❌ <b>Document Issue:</b> {html.escape(extract_result.error_message)}\n\n"
-            "Please ensure your spreadsheet contains columns for Question, Options (A, B, C, D), and Answer (or type /template).",
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    raw_text = extract_result.raw_text
-    parsed = fast_parser.parse(raw_text)
-    detected_count = len(parsed.questions)
-
-    if detected_count == 0:
-        detail_msg = ""
-        if parsed.errors:
-            first_err = parsed.errors[0]
-            detail_msg = f"\n\n<b>Details:</b> Q{first_err.question_number}: {html.escape(first_err.message)}"
-        await status_msg.edit_text(
-            f"⚠️ <b>No valid quiz questions could be detected in</b> <code>{html.escape(filename)}</code>.{detail_msg}\n\n"
-            "Please ensure columns include Question, Options (Option A, Option B, Option C, Option D), and Correct Answer (or download /template).",
+            f"⚠️ <b>Notice for</b> <code>{html.escape(filename)}</code>:\n\n"
+            f"{html.escape(err_text)}\n\n"
+            "<i>Supported: Excel (.xlsx), CSV (.csv), Word (.docx), PDF (.pdf), Images, and ZIP archives.</i>",
             reply_markup=get_multipart_input_keyboard(),
             parse_mode=ParseMode.HTML,
         )
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
     # Append part to session
-    part = session.add_part(raw_text, detected_questions=detected_count)
+    part = session.add_part(summary.raw_text, detected_questions=summary.total_detected)
     logger.info(
-        "User %s uploaded document %s (Part %d, %d detected questions, %d chars). Total parts: %d",
+        "User %s uploaded %s '%s' (Part %d, %d detected questions, %d chars). Total parts: %d",
         user_id,
+        summary.file_type,
         filename,
         part.part_number,
         part.detected_questions,
@@ -620,9 +591,20 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
         session.total_parts,
     )
 
+    badge_map = {
+        "excel": "📊 <b>Excel Spreadsheet</b>",
+        "csv": "📑 <b>CSV Spreadsheet</b>",
+        "word": "📝 <b>Word Document</b>",
+        "pdf": "📄 <b>PDF Document</b>",
+        "image": "🖼️ <b>Image / OCR</b>",
+        "zip": "📦 <b>ZIP Archive</b>",
+        "text": "📄 <b>Text Document</b>",
+    }
+    badge = badge_map.get(summary.file_type, "📄 <b>Document</b>")
+
     success_text = (
-        f"📄 <b>Document Processed:</b> <code>{html.escape(filename)}</code>\n\n"
-        f"• Questions detected: <b>{detected_count}</b>\n"
+        f"{badge} Processed: <code>{html.escape(filename)}</code>\n\n"
+        f"• Questions detected: <b>{summary.total_detected}</b>\n"
         f"• Total session questions: <b>{session.total_questions_detected}</b>\n"
         f"• Total parts combined: <b>{session.total_parts}</b>\n\n"
         "<i>Send another file or message with questions, or tap ✅ Done below to finish creating your quiz:</i>"
