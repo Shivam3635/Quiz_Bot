@@ -177,3 +177,40 @@ def test_pdf_unsupported_extension():
     result = extractor.extract(b"dummy data", "document.docx")
     assert result.success is False
     assert "Unsupported PDF document format" in result.error
+
+
+def test_pdf_bulleted_options_with_unicode_checkmark_and_preamble():
+    """Test PDF matching NCC_Practice_Quiz format: title preamble, bulleted options, ✓ checkmarks."""
+    page_text = (
+        "NCC Practice Quiz 16\n"
+        "25 MCQs • English + Hindi • Correct answers marked with ✓\n"
+        "Q1. What is the effective range of a .22 Deluxe Rifle? .22 डीलक्स राइफल की कारगर रेंज क्या है?\n"
+        "• A. 25 Yards (25 गज) ✓\n"
+        "• B. 50 Yards (50 गज)\n"
+        "• C. 300 Yards (300 गज)\n"
+        "• D. 1700 Yards (1700 गज)\n"
+        "Q2. What is the length of a .22 Deluxe Rifle? .22 डीलक्स राइफल की लंबाई क्या है?\n"
+        "• A. 45 Inches (45 इंच)\n"
+        "• B. 50 Inches (50 इंच)\n"
+        "• C. 110 cm (110 सेमी)\n"
+        "• D. 43 Inches (43 इंच) ✓\n"
+    )
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = page_text
+
+    mock_reader = MagicMock()
+    mock_reader.is_encrypted = False
+    mock_reader.pages = [mock_page]
+
+    with patch("pypdf.PdfReader", return_value=mock_reader):
+        extractor = PdfExtractor()
+        result = extractor.extract(b"%PDF-mock", "NCC_Practice_Quiz_16.pdf")
+
+        assert result.success is True
+        assert len(result.questions) == 2
+        assert result.questions[0].correct_index == 0
+        assert result.questions[1].correct_index == 3
+
+        parse_res = BulkQuizParser().parse(result.to_formatted_text())
+        assert not parse_res.has_errors
+        assert parse_res.valid_count == 2

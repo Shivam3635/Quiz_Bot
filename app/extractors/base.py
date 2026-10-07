@@ -70,7 +70,7 @@ class ExtractedQuestion:
             letter = option_letters[idx] if idx < len(option_letters) else str(idx + 1)
             # If answer is indicated by checkmark already in opt, keep it; otherwise if c_idx matches, can add ✅
             opt_clean = opt.strip()
-            if c_idx == idx and not any(m in opt_clean for m in ("✅", "✔️", "✔")):
+            if c_idx == idx and not any(m in opt_clean for m in ("✅", "✔️", "✔", "✓", "√")):
                 lines.append(f"{letter}) {opt_clean} ✅")
             else:
                 lines.append(f"{letter}) {opt_clean}")

@@ -147,3 +147,32 @@ def test_docx_unsupported_extension():
     result = extractor.extract(b"dummy data", "document.pdf")
     assert result.success is False
     assert "Unsupported Word document format" in result.error
+
+
+def test_docx_bulleted_options_with_unicode_checkmark():
+    """Test Word document with bulleted options (• A.) and ✓ checkmark."""
+    doc = docx.Document()
+    doc.add_paragraph("NCC Practice Quiz 16")
+    doc.add_paragraph("25 MCQs • English + Hindi • Correct answers marked with ✓")
+    doc.add_paragraph("Q1. What is the effective range of a .22 Deluxe Rifle? .22 डीलक्स राइफल की कारगर रेंज क्या है?")
+    doc.add_paragraph("• A. 25 Yards (25 गज) ✓")
+    doc.add_paragraph("• B. 50 Yards (50 गज)")
+    doc.add_paragraph("• C. 300 Yards (300 गज)")
+    doc.add_paragraph("• D. 1700 Yards (1700 गज)")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    docx_bytes = buf.getvalue()
+
+    extractor = DocxExtractor()
+    result = extractor.extract(docx_bytes, "NCC_Practice_Quiz_16.docx")
+
+    assert result.success is True
+    assert len(result.questions) == 1
+    assert result.questions[0].correct_index == 0
+    assert len(result.questions[0].options) == 4
+
+    parse_res = BulkQuizParser().parse(result.to_formatted_text())
+    assert not parse_res.has_errors
+    assert parse_res.valid_count == 1
+    assert parse_res.questions[0].correct_option == 0

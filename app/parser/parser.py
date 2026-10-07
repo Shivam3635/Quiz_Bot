@@ -20,14 +20,14 @@ NUMERIC_Q_RE = re.compile(
     r"^(\d+)[\.\:\-]\s+(.*)$",
 )
 
-# Option lines: A) / A. / A: / (A) / [A] / 1) / 1. / 1: / (1)
+# Option lines: A) / A. / A: / (A) / [A] / 1) / 1. / 1: / (1), with optional leading bullets (•, -, *, etc.)
 OPTION_LINE_RE = re.compile(
-    r"^(?:[\(\[]?([A-Za-z0-9])[\)\]\.\:\-]\s*)(.+)$",
+    r"^[\s\t\•\●\○\▪\▫\◆\◇\-\*\–\—]*[\(\[]?([A-Za-z0-9])(?:[\)\]\.\:\-]\s*|\s+)(.+)$",
 )
 
 # Answer line: Answer: B / Ans: B / Correct: B / Correct Answer: B / उत्तर: B
 ANSWER_LINE_RE = re.compile(
-    r"^(?:Answer|Ans|Correct\s*Answer|Correct|उत्तर)\s*(?:(?:is|hai|होगा)?\s*[\:\-\=\.]\s*(.+)|(?:\s+(?:is|hai|होगा)?\s*([A-Za-z0-9\(\)\[\]\✅\✔️\*]+)))$",
+    r"^(?:Answer|Ans|Correct\s*Answer|Correct|उत्तर)\s*(?:(?:is|hai|होगा)?\s*[\:\-\=\.]\s*(.+)|(?:\s+(?:is|hai|होगा)?\s*([A-Za-z0-9\(\)\[\]\✅\✔️\✔\✓\*]+)))$",
     re.IGNORECASE,
 )
 
@@ -39,11 +39,11 @@ EXPLANATION_LINE_RE = re.compile(
 
 # Inline answer indicators (checkmarks, asterisks, [x], (correct))
 INLINE_CORRECT_TRAILING_RE = re.compile(
-    r"[\s\(\[]*(?:✅|✔️|✔|☑️|☑|\[x\]|\[X\]|\(correct\)|\(ans\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*$",
+    r"[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|\[x\]|\[X\]|\(correct\)|\(ans\)|\(answer\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*$",
     re.IGNORECASE,
 )
 INLINE_CORRECT_LEADING_RE = re.compile(
-    r"^[\s\(\[]*(?:✅|✔️|✔|☑️|☑|\[x\]|\[X\]|\(correct\)|\(ans\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*",
+    r"^[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|\[x\]|\[X\]|\(correct\)|\(ans\)|\(answer\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*",
     re.IGNORECASE,
 )
 
@@ -56,6 +56,12 @@ class _DraftBlock:
     options: list[tuple[str, str]] = field(default_factory=list)  # (key, text)
     answer_raw: Optional[str] = None
     explanation_raw: Optional[str] = None
+    is_explicit_header: bool = False
+
+    @property
+    def is_ignorable_preamble(self) -> bool:
+        """True if this block was created from unnumbered preamble/title text without options or answer."""
+        return not self.is_explicit_header and len(self.options) == 0 and self.answer_raw is None
 
 
 class QuizBotProParser:
@@ -105,13 +111,13 @@ class QuizBotProParser:
 
             # Case 1: Explicit Question header (Q1., Question 1:, प्रश्न 1:)
             if explicit_match:
-                if current is not None:
+                if current is not None and not current.is_ignorable_preamble:
                     drafts.append(current)
                 num_str = explicit_match.group(1)
                 q_num = int(num_str) if num_str else auto_index
                 rest = explicit_match.group(2).strip()
                 prefix = line[: len(line) - len(rest)].strip() if rest else line.strip()
-                current = _DraftBlock(q_num=q_num, raw_prefix=prefix)
+                current = _DraftBlock(q_num=q_num, raw_prefix=prefix, is_explicit_header=True)
                 if rest:
                     current.question_lines.append(rest)
                 auto_index = q_num + 1
@@ -145,12 +151,12 @@ class QuizBotProParser:
                     should_start_new_q = True
 
                 if should_start_new_q:
-                    if current is not None:
+                    if current is not None and not current.is_ignorable_preamble:
                         drafts.append(current)
                     q_num = int(numeric_match.group(1))
                     rest = numeric_match.group(2).strip()
                     prefix = line[: len(line) - len(rest)].strip() if rest else line.strip()
-                    current = _DraftBlock(q_num=q_num, raw_prefix=prefix)
+                    current = _DraftBlock(q_num=q_num, raw_prefix=prefix, is_explicit_header=True)
                     if rest:
                         current.question_lines.append(rest)
                     auto_index = q_num + 1
@@ -165,8 +171,8 @@ class QuizBotProParser:
 
             # Case 6: Plain text
             if current is None:
-                # Started without an explicit Q1 / 1. header (single question paste)
-                current = _DraftBlock(q_num=auto_index, raw_prefix=f"Q{auto_index}.")
+                # Started without an explicit Q1 / 1. header (single question paste or document title)
+                current = _DraftBlock(q_num=auto_index, raw_prefix=f"Q{auto_index}.", is_explicit_header=False)
                 current.question_lines.append(line)
                 auto_index += 1
             elif current.answer_raw is not None:
@@ -183,7 +189,7 @@ class QuizBotProParser:
                 # Continued question line
                 current.question_lines.append(line)
 
-        if current is not None:
+        if current is not None and not current.is_ignorable_preamble:
             drafts.append(current)
 
         # Consolidate drafts: if a draft with the same q_num appears later
