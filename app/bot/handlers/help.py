@@ -60,63 +60,101 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send comprehensive official QuizBotPro PDF User Guide."""
-    chat_id = update.effective_chat.id if update.effective_chat else None
+    chat_id = update.effective_chat.id if update.effective_chat else (update.effective_user.id if update.effective_user else None)
     if not chat_id:
         return
 
     if update.callback_query:
-        await update.callback_query.answer("Generating PDF guide...")
+        try:
+            await update.callback_query.answer("Generating PDF guide...")
+        except Exception:
+            pass
 
-    from app.utils.guide_generator import build_user_guide_pdf_bytes
+    try:
+        import io
+        from app.utils.guide_generator import build_user_guide_pdf_bytes
 
-    pdf_bytes = build_user_guide_pdf_bytes()
-    caption = (
-        "📘 <b>QuizBotPro Official User Guide & Manual</b>\n\n"
-        "Here is your complete guide containing:\n"
-        "• What is QuizBotPro & Core Capabilities\n"
-        "• Step-by-Step Creation Walkthrough\n"
-        "• Supported Input Formats with Real Examples\n"
-        "• In-Depth Comparison: QuizBotPro vs Official @QuizBot\n"
-        "• Live Group Battle Tournaments & Admin Tips\n\n"
-        "<i>💡 Tip: Keep this PDF handy for reference whenever creating quizzes!</i>"
-    )
+        pdf_bytes = build_user_guide_pdf_bytes()
+        pdf_file = io.BytesIO(pdf_bytes)
+        pdf_file.name = "QuizBotPro_User_Guide.pdf"
 
-    await context.bot.send_document(
-        chat_id=chat_id,
-        document=pdf_bytes,
-        filename="QuizBotPro_User_Guide.pdf",
-        caption=caption,
-        parse_mode=ParseMode.HTML,
-    )
+        caption = (
+            "📘 <b>QuizBotPro Official User Guide & Manual</b>\n\n"
+            "Here is your complete guide containing:\n"
+            "• What is QuizBotPro & Core Capabilities\n"
+            "• Step-by-Step Creation Walkthrough\n"
+            "• Supported Input Formats with Real Examples\n"
+            "• In-Depth Comparison: QuizBotPro vs Official @QuizBot\n"
+            "• Live Group Battle Tournaments & Admin Tips\n\n"
+            "<i>💡 Tip: Keep this PDF handy for reference whenever creating quizzes!</i>"
+        )
+
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=pdf_file,
+            filename="QuizBotPro_User_Guide.pdf",
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.exception("Failed to send QuizBotPro PDF guide: %s", e)
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ <i>Unable to generate PDF guide at this moment. Please try again.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
 
 
 async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send ready-to-use sample Excel spreadsheet template (.xlsx)."""
-    if not update.effective_chat:
+    chat_id = update.effective_chat.id if update.effective_chat else (update.effective_user.id if update.effective_user else None)
+    if not chat_id:
         return
 
     if update.callback_query:
-        await update.callback_query.answer()
+        try:
+            await update.callback_query.answer()
+        except Exception:
+            pass
 
-    from app.extractors.sheet_extractor import generate_quiz_template_bytes
+    try:
+        import io
+        from app.extractors.sheet_extractor import generate_quiz_template_bytes
 
-    buf_bytes = generate_quiz_template_bytes()
-    caption = (
-        "📥 <b>QuizBotPro Spreadsheet Template</b>\n\n"
-        "Fill your quiz questions into this Excel sheet and upload it directly to QuizBotPro!\n\n"
-        "<b>Supported Columns:</b>\n"
-        "• <b>Question:</b> Question text (supports bilingual Hindi/English)\n"
-        "• <b>Option A - D:</b> Answer choices\n"
-        "• <b>Answer:</b> Correct option letter (e.g. <code>A</code>, <code>B</code>, <code>C</code>, <code>D</code>)\n"
-        "• <b>Explanation:</b> Optional explanation\n\n"
-        "<i>💡 Tip: You can also upload CSV files (.csv) formatted the same way!</i>"
-    )
+        buf_bytes = generate_quiz_template_bytes()
+        tpl_file = io.BytesIO(buf_bytes)
+        tpl_file.name = "quiz_template.xlsx"
 
-    await context.bot.send_document(
-        chat_id=update.effective_chat.id,
-        document=buf_bytes,
-        filename="quiz_template.xlsx",
-        caption=caption,
-        parse_mode=ParseMode.HTML,
-    )
+        caption = (
+            "📥 <b>QuizBotPro Spreadsheet Template</b>\n\n"
+            "Fill your quiz questions into this Excel sheet and upload it directly to QuizBotPro!\n\n"
+            "<b>Supported Columns:</b>\n"
+            "• <b>Question:</b> Question text (supports bilingual Hindi/English)\n"
+            "• <b>Option A - D:</b> Answer choices\n"
+            "• <b>Answer:</b> Correct option letter (e.g. <code>A</code>, <code>B</code>, <code>C</code>, <code>D</code>)\n"
+            "• <b>Explanation:</b> Optional explanation\n\n"
+            "<i>💡 Tip: You can also upload CSV files (.csv) formatted the same way!</i>"
+        )
+
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=tpl_file,
+            filename="quiz_template.xlsx",
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.exception("Failed to send quiz template: %s", e)
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ <i>Unable to generate template at this moment. Please try again.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
 

@@ -74,8 +74,8 @@ async def test_guide_command_sends_document_pdf():
     assert kwargs.get("filename") == "QuizBotPro_User_Guide.pdf"
     assert "Official User Guide" in kwargs.get("caption")
     document_data = kwargs.get("document")
-    assert isinstance(document_data, bytes)
-    assert document_data.startswith(b"%PDF-")
+    raw_bytes = document_data if isinstance(document_data, bytes) else document_data.getvalue()
+    assert raw_bytes.startswith(b"%PDF-")
 
 
 @pytest.mark.asyncio
