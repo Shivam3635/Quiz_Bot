@@ -17,7 +17,7 @@ from app.bot.handlers.bulk import (
     start_quiz_session_flow,
 )
 from app.bot.handlers.common import coming_soon_callback
-from app.bot.handlers.help import help_command, template_command
+from app.bot.handlers.help import guide_command, help_command, template_command
 from app.bot.handlers.preview import (
     confirm_delete_question_callback,
     delete_question_prompt_callback,
@@ -87,6 +87,7 @@ from app.bot.handlers.start import start_command
 __all__ = [
     "start_command",
     "help_command",
+    "guide_command",
     "template_command",
     "coming_soon_callback",
     "start_quiz_session_flow",

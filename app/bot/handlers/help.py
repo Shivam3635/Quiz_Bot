@@ -9,63 +9,41 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 HELP_MESSAGE = (
-    "❓ <b>QuizBotPro Help & Usage Guide</b>\n\n"
-    "QuizBotPro lets you bulk-create native Telegram quiz polls quickly.\n\n"
-    "<b>Supported Question Format:</b>\n"
-    "<code>"
-    "Q1. What is the capital of India?\n"
-    "A) Mumbai\n"
-    "B) New Delhi\n"
-    "C) Kolkata\n"
-    "D) Chennai\n"
-    "Answer: B\n\n"
-    "Q2. Which language is used for web styling?\n"
-    "A) Python\n"
-    "B) Java\n"
-    "C) CSS\n"
-    "D) C++\n"
-    "Answer: C"
-    "</code>\n\n"
-    "✨ <b>Rich Text Formatting Supported:</b>\n"
-    "You can style question text and explanations using:\n"
-    "• <b>Bold:</b> <code>**word**</code> or <code>&lt;b&gt;word&lt;/b&gt;</code>\n"
-    "• <i>Italic:</i> <code>*word*</code> or <code>&lt;i&gt;word&lt;/i&gt;</code>\n"
-    "• <code>Code:</code> <code>`code`</code> or <code>&lt;code&gt;code&lt;/code&gt;</code>\n"
-    "• <u>Underline:</u> <code>__word__</code> or <code>&lt;u&gt;word&lt;/u&gt;</code>\n"
-    "• <s>Strikethrough:</s> <code>~~word~~</code> or <code>&lt;s&gt;word&lt;/s&gt;</code>\n\n"
-    "📄 <b>Document Uploads Supported:</b>\n"
-    "Instead of typing, simply send a file in quiz creation mode:\n"
-    "• <b>Excel (.xlsx, .xlsm)</b> or <b>CSV (.csv)</b>\n"
-    "• <b>Word Documents (.docx)</b> (paragraphs or tables)\n"
-    "• <b>PDF Documents (.pdf)</b>\n\n"
-    "<b>Steps:</b>\n"
+    "💡 <b>QuizBotPro Quick Help & Guidelines</b>\n\n"
+    "Create, manage, and host hundreds of native Telegram quiz polls in seconds!\n\n"
+    "<b>⚡ 3-Step Quickstart:</b>\n"
     "1️⃣ Run /newquiz or tap <b>📦 Bulk Create</b>\n"
-    "2️⃣ Set Title and Description (optional)\n"
-    "3️⃣ Send questions or upload a document, then press <b>✅ Done</b>\n"
-    "4️⃣ Configure settings (timer, anonymous, channel destination)\n"
-    "5️⃣ Preview, edit, and publish automatically!\n\n"
-    "<b>Commands:</b>\n"
-    "• /newquiz - Create a new bulk quiz\n"
-    "• /myquizzes - Dashboard to view past quizzes & 1-click re-publish\n"
-    "• /startquiz - Launch a live group quiz battle\n"
-    "• /stopquiz - Stop an active group quiz battle\n"
-    "• /cancel - Cancel current session\n"
-    "• /template - Download sample Excel spreadsheet template\n"
-    "• /help - Show this guide\n\n"
-    "💡 <i>Tip: Ensure this bot is an Admin with 'Post Messages' rights in your target channel.</i>"
+    "2️⃣ Paste questions or upload files (Excel, Word, CSV, PDF)\n"
+    "3️⃣ Tap <b>✅ Done</b>, configure your timer/channel, and tap <b>Publish</b>!\n\n"
+    "<b>📄 Supported Input Formats:</b>\n"
+    "• <b>Direct Text:</b> Q1, options (A, B, C, D), and answers (marked with ✅ or <code>Answer: B</code>)\n"
+    "• <b>Spreadsheets:</b> Excel (<code>.xlsx</code>) and CSV (<code>.csv</code>)\n"
+    "• <b>Documents:</b> Word (<code>.docx</code>) and PDF (<code>.pdf</code>)\n"
+    "• <b>Bilingual:</b> English + Hindi questions automatically formatted cleanly\n\n"
+    "<b>🚀 Essential Commands:</b>\n"
+    "• /newquiz — Create a new bulk quiz set\n"
+    "• /myquizzes — View saved quizzes & 1-click re-publish\n"
+    "• /startquiz — Launch a live group quiz battle tournament\n"
+    "• /template — Download sample Excel spreadsheet template\n"
+    "• /guide — <b>Download Complete PDF User Guide & Manual</b>\n\n"
+    "<i>📖 For comprehensive guidelines, full format examples, comparison with official @QuizBot, and pro tips, download the PDF guide below!</i>"
 )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /help command or help callback button."""
-    back_keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="action_main_menu")]]
+    """Handle /help command or help callback button with clear, brief guidance."""
+    help_keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📖 Download Complete PDF Guide", callback_data="action_download_guide")],
+            [InlineKeyboardButton("📥 Sample Excel Template", callback_data="action_download_template")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="action_main_menu")],
+        ]
     )
 
     if update.message:
         await update.message.reply_text(
             HELP_MESSAGE,
-            reply_markup=back_keyboard,
+            reply_markup=help_keyboard,
             parse_mode=ParseMode.HTML,
         )
     elif update.callback_query:
@@ -73,17 +51,52 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         try:
             await update.callback_query.edit_message_text(
                 HELP_MESSAGE,
-                reply_markup=back_keyboard,
+                reply_markup=help_keyboard,
                 parse_mode=ParseMode.HTML,
             )
         except Exception as e:
             logger.debug("Minor edit text exception: %s", e)
 
 
+async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send comprehensive official QuizBotPro PDF User Guide."""
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+
+    if update.callback_query:
+        await update.callback_query.answer("Generating PDF guide...")
+
+    from app.utils.guide_generator import build_user_guide_pdf_bytes
+
+    pdf_bytes = build_user_guide_pdf_bytes()
+    caption = (
+        "📘 <b>QuizBotPro Official User Guide & Manual</b>\n\n"
+        "Here is your complete guide containing:\n"
+        "• What is QuizBotPro & Core Capabilities\n"
+        "• Step-by-Step Creation Walkthrough\n"
+        "• Supported Input Formats with Real Examples\n"
+        "• In-Depth Comparison: QuizBotPro vs Official @QuizBot\n"
+        "• Live Group Battle Tournaments & Admin Tips\n\n"
+        "<i>💡 Tip: Keep this PDF handy for reference whenever creating quizzes!</i>"
+    )
+
+    await context.bot.send_document(
+        chat_id=chat_id,
+        document=pdf_bytes,
+        filename="QuizBotPro_User_Guide.pdf",
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send ready-to-use sample Excel spreadsheet template (.xlsx)."""
     if not update.effective_chat:
         return
+
+    if update.callback_query:
+        await update.callback_query.answer()
 
     from app.extractors.sheet_extractor import generate_quiz_template_bytes
 
@@ -106,3 +119,4 @@ async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         caption=caption,
         parse_mode=ParseMode.HTML,
     )
+

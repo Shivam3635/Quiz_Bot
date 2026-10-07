@@ -45,6 +45,7 @@ from app.bot.handlers import (
     execute_republish_callback,
     finish_creation_settings_callback,
     fix_invalid_question_callback,
+    guide_command,
     handle_poll_answer,
     help_command,
     join_game_callback,
@@ -110,6 +111,7 @@ async def post_init(application: Application) -> None:
         BotCommand("stopquiz", "Stop active group quiz battle"),
         BotCommand("bulk", "Multi-part bulk quiz creation"),
         BotCommand("template", "Download Excel (.xlsx) quiz spreadsheet template"),
+        BotCommand("guide", "Download complete official PDF user guide"),
         BotCommand("help", "Formatting guide and instructions"),
         BotCommand("cancel", "Cancel current creation session"),
     ]
@@ -241,9 +243,14 @@ def create_bot_app() -> Application:
     application.add_handler(CommandHandler("newquiz", start_quiz_session_flow))
     application.add_handler(CommandHandler("myquizzes", my_quizzes_command))
     application.add_handler(CommandHandler("template", template_command))
+    application.add_handler(CommandHandler("guide", guide_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("startquiz", startquiz_command))
     application.add_handler(CommandHandler("stopquiz", stopquiz_command))
+
+    # Guide and Template download callbacks
+    application.add_handler(CallbackQueryHandler(guide_command, pattern="^action_download_guide$"))
+    application.add_handler(CallbackQueryHandler(template_command, pattern="^action_download_template$"))
 
     # Live Group Quiz Battle callbacks
     application.add_handler(CallbackQueryHandler(join_game_callback, pattern="^game_join_\\d+$"))
