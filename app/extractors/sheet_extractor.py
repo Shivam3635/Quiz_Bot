@@ -12,27 +12,31 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 QUESTION_HEADER_RE = re.compile(
-    r"^(?:question|questions|question\s*text|q\s*text|prompt|question\s*\(english\)|english\s*question|question\s*title)$",
+    r"^(?:question[_\s\-]*text|question|questions|q[_\s\-]*text|prompt|question[_\s\-]*(?:\(english\)|english)|english[_\s\-]*question|question[_\s\-]*title|सवाल|प्रश्न)$",
     re.IGNORECASE,
 )
 HINDI_QUESTION_HEADER_RE = re.compile(
-    r"^(?:hindi\s*question|question\s*\(hindi\)|hindi|हिंदी|हिंदी\s*प्रश्न|सवाल\s*\(हिंदी\)|सवाल|प्रश्न)$",
+    r"^(?:hindi[_\s\-]*question|question[_\s\-]*(?:\(hindi\)|hindi)|q[_\s\-]*hindi|hindi[_\s\-]*q|question[_\s\-]*hin|hindi|हिंदी|हिंदी[_\s\-]*प्रश्न|सवाल[_\s\-]*\(हिंदी\)|प्रश्न[_\s\-]*\(हिंदी\))$",
+    re.IGNORECASE,
+)
+OPTION_HINDI_HEADER_RE = re.compile(
+    r"^(?:(?:option|opt|choice|विकल्प)[_\s\-]*([a-z0-9]+)[_\s\-]*(?:hindi|hin)|\(([a-z0-9]+)\)[_\s\-]*(?:hindi|hin)|(?:hindi|hin)[_\s\-]*(?:option|opt|choice)[_\s\-]*([a-z0-9]+))$",
     re.IGNORECASE,
 )
 ANSWER_HEADER_RE = re.compile(
-    r"^(?:answer|ans|correct\s*answer|correct\s*option|correct|key|उत्तर|सही\s*उत्तर|right\s*answer)$",
+    r"^(?:answer|ans|correct[_\s\-]*answer|correct[_\s\-]*option|correct|key|right[_\s\-]*answer|उत्तर|सही[_\s\-]*उत्तर)$",
     re.IGNORECASE,
 )
 EXPLANATION_HEADER_RE = re.compile(
-    r"^(?:explanation|expl|note|why|reason|व्याख्या|स्पष्टीकरण)$",
+    r"^(?:explanation|expl|note|notes|why|reason|व्याख्या|स्पष्टीकरण)$",
     re.IGNORECASE,
 )
 QNUM_HEADER_RE = re.compile(
-    r"^(?:q\s*no|q_no|qnum|q_num|id|no|s\.?no|sr\.?no|क्रम\s*संख्या|#)$",
+    r"^(?:q[_\s\-]*no|qnum|q[_\s\-]*num|qid|q_id|id|no|s\.?no|sr\.?no|क्रम[_\s\-]*संख्या|#)$",
     re.IGNORECASE,
 )
 OPTION_HEADER_RE = re.compile(
-    r"^(?:option\s*([a-z0-9])|opt\s*([a-z0-9])|([a-z])|\(([a-z0-9])\)|\[([a-z0-9])\])$",
+    r"^(?:(?:option|opt|choice|विकल्प)[_\s\-]*([a-z0-9]+)|([a-e])|\(([a-z0-9]+)\)|\[([a-z0-9]+)\])$",
     re.IGNORECASE,
 )
 
@@ -99,28 +103,37 @@ class SheetExtractor(BaseExtractor):
                 source_filename=filename,
             )
 
-        # Use first non-empty sheet
-        raw_rows: list[list[str]] = []
+        best_result: Optional[ExtractionResult] = None
+
+        # Check each non-empty sheet in the workbook
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             rows_in_sheet: list[list[str]] = []
             for row in ws.iter_rows(values_only=True):
-                # Convert all cell values to string and strip
                 str_row = [str(cell).strip() if cell is not None else "" for cell in row]
-                # Keep if row has any non-empty cell
                 if any(str_row):
                     rows_in_sheet.append(str_row)
-            if rows_in_sheet:
-                raw_rows = rows_in_sheet
-                break
 
-        if not raw_rows:
-            return ExtractionResult(
-                error_message="The Excel file is empty or contains no readable sheets.",
-                source_filename=filename,
-            )
+            if not rows_in_sheet:
+                continue
 
-        return self._process_grid(raw_rows, filename)
+            result = self._process_grid(rows_in_sheet, filename)
+            # If this sheet yielded valid questions, return it immediately
+            if result.success and len(result.questions) > 0:
+                logger.info("Successfully extracted %d questions from sheet '%s' in %s", len(result.questions), sheet_name, filename)
+                return result
+
+            # Track best result across sheets
+            if best_result is None or (result.total_found > best_result.total_found):
+                best_result = result
+
+        if best_result is not None:
+            return best_result
+
+        return ExtractionResult(
+            error_message="The Excel file is empty or contains no readable sheets.",
+            source_filename=filename,
+        )
 
     def _process_grid(self, raw_rows: list[list[str]], filename: str) -> ExtractionResult:
         """Convert a 2D grid of rows into structured ExtractedQuestions."""
@@ -185,14 +198,15 @@ class SheetExtractor(BaseExtractor):
         )
 
     def _detect_headers(self, rows: list[list[str]]) -> tuple[Optional[int], dict]:
-        """Inspect top rows to identify header mapping."""
-        # Inspect first 3 rows
-        for r_idx in range(min(3, len(rows))):
+        """Inspect rows to identify header mapping (scanning up to first 50 rows to bypass dashboards)."""
+        max_scan = min(50, len(rows))
+        for r_idx in range(max_scan):
             row = rows[r_idx]
             mapping = {
                 "question": None,
                 "hindi_question": None,
                 "options": [],  # list of (col_idx, letter_or_key)
+                "options_hindi": {},  # key -> col_idx
                 "answer": None,
                 "explanation": None,
                 "q_num": None,
@@ -214,17 +228,21 @@ class SheetExtractor(BaseExtractor):
                 elif QNUM_HEADER_RE.match(cell_clean):
                     mapping["q_num"] = c_idx
                 else:
-                    opt_m = OPTION_HEADER_RE.match(cell_clean)
-                    if opt_m:
-                        # Extract the matched group (letter or number)
-                        key = next((g for g in opt_m.groups() if g is not None), "").upper()
-                        mapping["options"].append((c_idx, key))
+                    opt_hin_m = OPTION_HINDI_HEADER_RE.match(cell_clean)
+                    if opt_hin_m:
+                        key = next((g for g in opt_hin_m.groups() if g is not None), "").upper()
+                        mapping["options_hindi"][key] = c_idx
+                    else:
+                        opt_m = OPTION_HEADER_RE.match(cell_clean)
+                        if opt_m:
+                            key = next((g for g in opt_m.groups() if g is not None), "").upper()
+                            mapping["options"].append((c_idx, key))
 
             # If only hindi question column was found, treat as question
             if mapping["question"] is None and mapping["hindi_question"] is not None:
                 mapping["question"] = mapping["hindi_question"]
 
-            # If we found at least a question column and at least 2 option columns OR an answer column
+            # If we found at least a question column and (at least 2 option columns OR an answer column)
             if mapping["question"] is not None and (len(mapping["options"]) >= 2 or mapping["answer"] is not None):
                 # Sort options by column index
                 mapping["options"].sort(key=lambda x: x[0])
@@ -244,6 +262,10 @@ class SheetExtractor(BaseExtractor):
         if not question_text:
             return None
 
+        # Ignore summary / metadata rows (e.g. "Total", "Average", "Note:")
+        if re.match(r"^(?:total|average|sum|grand\s*total|note|remarks?)[:\s]", question_text, re.IGNORECASE):
+            return None
+
         # Append separate Hindi question column if present
         hindi_idx = mapping.get("hindi_question")
         if hindi_idx is not None and hindi_idx != q_idx and hindi_idx < len(row):
@@ -255,16 +277,26 @@ class SheetExtractor(BaseExtractor):
                     question_text = f"{question_text} {hindi_text}"
 
         options: list[str] = []
-        for c_idx, _key in mapping.get("options", []):
+        options_hindi = mapping.get("options_hindi", {})
+        for c_idx, key in mapping.get("options", []):
             if c_idx < len(row):
                 val = row[c_idx].strip()
                 if val:
+                    # Check if there's a Hindi translation column for this option
+                    if key in options_hindi and options_hindi[key] < len(row):
+                        hin_val = row[options_hindi[key]].strip()
+                        if hin_val:
+                            val = f"{val} ({hin_val})"
                     options.append(val)
 
-        # If options weren't in dedicated columns, check for a single options column
+        # If options weren't in dedicated columns, check for standard remaining columns
         if not options and len(row) > q_idx + 1:
             for extra_idx in range(q_idx + 1, len(row)):
-                if extra_idx != mapping.get("answer") and extra_idx != mapping.get("explanation"):
+                if (
+                    extra_idx != mapping.get("answer")
+                    and extra_idx != mapping.get("explanation")
+                    and extra_idx != mapping.get("hindi_question")
+                ):
                     val = row[extra_idx].strip()
                     if val:
                         options.append(val)

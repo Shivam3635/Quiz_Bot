@@ -19,21 +19,43 @@ class ExtractedQuestion:
         """Convert answer_raw (e.g. 'A', '1', option text) to 0-based option index."""
         if not self.answer_raw:
             return None
-        raw = self.answer_raw.strip().upper()
-        # Single letter A-Z
-        if len(raw) == 1 and "A" <= raw <= "Z":
-            idx = ord(raw) - ord("A")
-            if idx < len(self.options):
-                return idx
-        # Digit 1-9
-        if raw.isdigit():
-            idx = int(raw) - 1
-            if 0 <= idx < len(self.options):
-                return idx
-        # Option text exact or case-insensitive match
+        import re
+
+        raw = self.answer_raw.strip()
+        if not raw:
+            return None
+
+        # 1. Exact match with option text (case-insensitive, normalized punctuation)
+        norm_raw = raw.lower().rstrip(". ,;").strip()
         for idx, opt in enumerate(self.options):
-            if opt.strip().lower() == self.answer_raw.strip().lower():
+            norm_opt = opt.strip().lower().rstrip(". ,;").strip()
+            if norm_opt and norm_opt == norm_raw:
                 return idx
+
+        # 2. Check for explicit option letter/number tokens: 'A', 'Option A', '(A)', 'A)', '1', 'Option 1'
+        opt_token_m = re.match(
+            r"^(?:option|opt|choice|विकल्प)?[_\s\-]*\(?([a-z0-9]+)\)?[\.\)]?$",
+            raw,
+            re.IGNORECASE,
+        )
+        if opt_token_m:
+            token = opt_token_m.group(1).upper()
+            if len(token) == 1 and "A" <= token <= "Z":
+                idx = ord(token) - ord("A")
+                if idx < len(self.options):
+                    return idx
+            if token.isdigit():
+                idx = int(token) - 1
+                if 0 <= idx < len(self.options):
+                    return idx
+
+        # 3. Fuzzy/substring match for longer option texts (e.g. 'Topographic' vs 'Topographic Map')
+        if len(norm_raw) >= 4:
+            for idx, opt in enumerate(self.options):
+                norm_opt = opt.strip().lower().rstrip(". ,;").strip()
+                if norm_opt and (norm_raw == norm_opt or norm_raw in norm_opt or norm_opt in norm_raw):
+                    return idx
+
         return None
 
     def to_formatted_block(self, default_number: int = 1) -> str:

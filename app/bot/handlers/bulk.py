@@ -597,10 +597,14 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
     parsed = fast_parser.parse(raw_text)
     detected_count = len(parsed.questions)
 
-    if detected_count == 0 and parsed.total_blocks_found == 0:
+    if detected_count == 0:
+        detail_msg = ""
+        if parsed.errors:
+            first_err = parsed.errors[0]
+            detail_msg = f"\n\n<b>Details:</b> Q{first_err.question_number}: {html.escape(first_err.message)}"
         await status_msg.edit_text(
-            f"⚠️ <b>No quiz questions detected in</b> <code>{html.escape(filename)}</code>.\n\n"
-            "Please ensure columns are labeled with Question, Option A, Option B, Option C, Option D, and Answer.",
+            f"⚠️ <b>No valid quiz questions could be detected in</b> <code>{html.escape(filename)}</code>.{detail_msg}\n\n"
+            "Please ensure columns include Question, Options (Option A, Option B, Option C, Option D), and Correct Answer (or download /template).",
             reply_markup=get_multipart_input_keyboard(),
             parse_mode=ParseMode.HTML,
         )
