@@ -70,3 +70,21 @@ def test_non_hindi_text_untouched():
     """English text without Devanagari is returned immediately without modification."""
     text = "What is the speed of light? 3x10^8 m/s"
     assert clean_devanagari_text(text) == text
+
+
+def test_legacy_shifted_font_repaired():
+    """Verify legacy shifted font words (फकस, वतवि, मनार्ा, गर्ा, िा) are repaired."""
+    text = "ववश्व पर्ािवरण फिवस प्रत्र्ेक वर्ि फकस वतवि को मनार्ा जाता है? भारत में वन्यजीव संरक्षण अधिनियम फकस वर्ि लागू फकर्ा गर्ा िा?"
+    cleaned = clean_devanagari_text(text)
+    assert "विश्व" in cleaned
+    assert "पर्यावरण" in cleaned
+    assert "दिवस" in cleaned
+    assert "प्रत्येक" in cleaned
+    assert "वर्ष" in cleaned
+    assert "किस" in cleaned
+    assert "तिथि" in cleaned
+    assert "मनाया" in cleaned
+    assert "अधिनियम" in cleaned
+    assert "किया" in cleaned
+    assert "गया" in cleaned
+    assert "था" in cleaned

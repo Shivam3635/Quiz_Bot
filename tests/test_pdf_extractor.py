@@ -243,3 +243,38 @@ def test_pdf_distorted_hindi_cleaned():
         assert "मीन पॉइंट ऑफ इन्फैंट्री" in q.options[2]
         assert "मुख्य स्थिति इन्फैंट्री" in q.options[3]
 
+
+def test_pdf_promo_noise_and_all_questions_detected():
+    """Verify promotional lines, URLs, and exam titles are filtered out without breaking questions."""
+    page_text = (
+        "NCC B & C Certificate Exam 2026 – 50 Important MCQs\n"
+        "Page 1 of 9\n"
+        "Proud NCC Youtube Channel, Environment & Ecology\n"
+        "Q1. On which date is World Environment Day celebrated every year?\n"
+        "ववश्व पर्ािवरण फिवस प्रत्र्ेक वर्ि फकस वतवि को मनार्ा जाता है?\n"
+        "A. 5 June / 5 जून ✅\n"
+        "B. 22 April / 22 अप्रैल\n"
+        "C. 16 September / 16 वसतंबर\n"
+        "D. 2 October / 2 अक्टूबर\n"
+        "YouTube Channel – Proud NCC www.youtube.com/@ProudNCC\n"
+        "Instagram – @proudncc www.instagram.com/proudncc\n"
+    )
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = page_text
+
+    mock_reader = MagicMock()
+    mock_reader.is_encrypted = False
+    mock_reader.pages = [mock_page]
+
+    with patch("pypdf.PdfReader", return_value=mock_reader):
+        extractor = PdfExtractor()
+        result = extractor.extract(b"%PDF-mock", "50_mcqs.pdf")
+
+        assert result.success is True
+        assert len(result.questions) == 1
+        q = result.questions[0]
+        assert "YouTube" not in q.options[3]
+        assert "विश्व पर्यावरण दिवस" in q.question_text
+        assert "16 सितंबर" in q.options[2]
+
+

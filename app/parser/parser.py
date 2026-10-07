@@ -28,7 +28,7 @@ OPTION_LINE_RE = re.compile(
 
 # Answer line: Answer: B / Ans: B / Correct: B / Correct Answer: B / उत्तर: B
 ANSWER_LINE_RE = re.compile(
-    r"^(?:Answer|Ans|Correct\s*Answer|Correct|उत्तर)\s*(?:(?:is|hai|होगा)?\s*[\:\-\=\.]\s*(.+)|(?:\s+(?:is|hai|होगा)?\s*([A-Za-z0-9\(\)\[\]\✅\✔️\✔\✓\*]+)))$",
+    r"^(?:Answer|Ans|Correct\s*Answer|Correct|उत्तर)\s*(?:(?:is|hai|होगा)?\s*[\:\-\=\.]\s*(.+)|(?:\s+(?:is|hai|होगा)?\s*([A-Za-z0-9\(\)\[\]\✅\✔️\✔\✓\□\🔲\■\▫\▣\▢\*]+)))$",
     re.IGNORECASE,
 )
 
@@ -38,14 +38,17 @@ EXPLANATION_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Inline answer indicators (checkmarks, asterisks, [x], (correct))
+# Inline answer indicators (checkmarks, asterisks, boxes, [x], (correct))
 INLINE_CORRECT_TRAILING_RE = re.compile(
-    r"[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|\[x\]|\[X\]|\(correct\)|\(ans\)|\(answer\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*$",
+    r"[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|□|🔲|■|▫|▣|▢|\[x\]|\[X\]|\(correct\)|\(ans\)|\(answer\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*$",
     re.IGNORECASE,
 )
 INLINE_CORRECT_LEADING_RE = re.compile(
-    r"^[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|\[x\]|\[X\]|\(correct\)|\(ans\)|\(answer\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*",
+    r"^[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|□|🔲|■|▫|▣|▢|\[x\]|\[X\]|\(correct\)|\(ans\)|\(answer\)|\(उत्तर\)|\(सही\)|\*)+[\s\)\]]*",
     re.IGNORECASE,
+)
+INLINE_CORRECT_ANYWHERE_RE = re.compile(
+    r"[\s\(\[]*(?:✅|✔️|✔|✓|☑️|☑|√|□|🔲|■|▫|▣|▢)+[\s\)\]]*"
 )
 
 
@@ -241,7 +244,7 @@ class QuizBotProParser:
                 details=f"Options found: {', '.join(opt_strings)}",
             )
 
-        # 3. Detect inline correct answer markers (e.g. ✅, [x], *) in options
+        # 3. Detect inline correct answer markers (e.g. ✅, [x], *, □) in options
         detected_inline_idx: Optional[int] = None
         cleaned_options: list[tuple[str, str]] = []
 
@@ -249,12 +252,12 @@ class QuizBotProParser:
             has_marker = bool(
                 INLINE_CORRECT_TRAILING_RE.search(opt_text)
                 or INLINE_CORRECT_LEADING_RE.search(opt_text)
+                or INLINE_CORRECT_ANYWHERE_RE.search(opt_text)
             )
             cleaned_text = opt_text
             if has_marker:
-                cleaned_text = INLINE_CORRECT_LEADING_RE.sub(
-                    "", INLINE_CORRECT_TRAILING_RE.sub("", opt_text)
-                ).strip()
+                cleaned_text = INLINE_CORRECT_ANYWHERE_RE.sub(" ", opt_text).strip()
+                cleaned_text = re.sub(r"\s+", " ", cleaned_text)
                 if detected_inline_idx is None:
                     detected_inline_idx = idx
 

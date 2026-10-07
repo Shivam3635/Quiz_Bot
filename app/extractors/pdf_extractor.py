@@ -18,6 +18,12 @@ PAGE_ARTIFACT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Promotional links, channels, watermarks, exam titles, and footer noise regex
+PDF_PROMO_NOISE_RE = re.compile(
+    r"(?:https?://\S+|www\.\S+|YouTube\s*(?:Channel)?|Instagram|Telegram|@\w+|Share\s*with\s*Your|Proud\s*NCC|NCC\s+[ABC\s&,–\-]+Certificate|Environment\s*&\s*Ecology|Important\s*MCQs)",
+    re.IGNORECASE,
+)
+
 
 class PdfExtractor(BaseExtractor):
     """Extracts quiz questions from PDF (.pdf) files using text layout extraction."""
@@ -72,6 +78,9 @@ class PdfExtractor(BaseExtractor):
             for line in lines:
                 # Filter out pure page numbering headers/footers
                 if PAGE_ARTIFACT_RE.match(line):
+                    continue
+                # Filter out promotional URLs, YouTube/Instagram links, and watermarks
+                if PDF_PROMO_NOISE_RE.search(line):
                     continue
                 extracted_page_lines.append(line)
 
