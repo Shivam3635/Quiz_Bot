@@ -4,6 +4,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
+from app.bot.handlers.common import ADMIN_REQUIRED_MESSAGE, require_group_admin
 from app.bot.keyboards.main import get_main_menu_keyboard
 from app.utils.logger import setup_logger
 
@@ -18,9 +19,11 @@ WELCOME_MESSAGE = (
 )
 
 
+@require_group_admin
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command and display the welcome menu."""
     user = update.effective_user
+    chat = update.effective_chat
     logger.info("User %s (%s) triggered /start", user.id if user else "Unknown", user.username if user else "")
 
     # Check for deep link payload (e.g. /start quiz_5 or /startgroup quiz_5)
@@ -29,13 +32,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         quiz_id_str = args[0].replace("quiz_", "")
         if quiz_id_str.isdigit():
             quiz_id = int(quiz_id_str)
-            chat = update.effective_chat
             if chat and chat.type in ("group", "supergroup"):
                 try:
                     member = await chat.get_member(user.id)
-                    if member.status not in ("creator", "administrator"):
+                    if member.status not in ("creator", "administrator") and getattr(member.user, "username", "") != "GroupAnonymousBot":
                         if update.message:
-                            await update.message.reply_text("⚠️ Only group administrators can launch a quiz battle.")
+                            await update.message.reply_text(ADMIN_REQUIRED_MESSAGE)
                         return
                 except Exception:
                     pass
@@ -58,6 +60,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 await startquiz_command(update, context)
                 return
 
+    # In groups/supergroups without a deep link payload: display group command guidance
+    if chat and chat.type in ("group", "supergroup"):
+        bot_username = context.bot.username or "my_bulk_quiz_bot"
+        if update.message:
+            await update.message.reply_text(
+                "👋 <b>QuizBotPro Group Mode</b>\n\n"
+                "To launch a quiz battle in this group, run:\n"
+                "<code>/startquiz &lt;quiz_id&gt;</code>\n\n"
+                f"To create quizzes or manage quiz sets, open a private chat: @{bot_username}",
+                parse_mode=ParseMode.HTML,
+            )
+        return
+
     if update.message:
         await update.message.reply_text(
             WELCOME_MESSAGE,
@@ -71,3 +86,4 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             reply_markup=get_main_menu_keyboard(),
             parse_mode=ParseMode.HTML,
         )
+

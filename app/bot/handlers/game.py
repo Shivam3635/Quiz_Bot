@@ -17,19 +17,13 @@ from app.database.repositories import get_quiz_set_by_id, get_user_quiz_sets, re
 from app.services.game_service import GameSession, get_game_manager, run_game_loop
 from app.utils.logger import setup_logger
 
+from app.bot.handlers.common import (
+    ADMIN_REQUIRED_MESSAGE,
+    is_user_group_admin,
+    require_group_admin,
+)
+
 logger = setup_logger(__name__)
-
-
-async def is_user_group_admin(bot, chat, user_id: int) -> bool:
-    """Return True if in private chat or user is group admin/creator."""
-    if not chat or chat.type in (ChatType.PRIVATE, "private"):
-        return True
-    try:
-        member = await chat.get_member(user_id)
-        return member.status in ("creator", "administrator")
-    except Exception as e:
-        logger.warning("Could not check admin status for user %s in chat %s: %s", user_id, getattr(chat, 'id', 'unknown'), e)
-        return False
 
 
 async def launch_game_lobby(
@@ -92,6 +86,7 @@ async def launch_game_lobby(
     return game
 
 
+@require_group_admin
 async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /startquiz [quiz_id] in both private chats and groups."""
     chat = update.effective_chat
@@ -161,7 +156,7 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # 2. Group chat behavior:
     # Requirement 8: Quiz can only be posted and controlled by the group Admin
     if not await is_user_group_admin(context.bot, chat, user.id):
-        await update.message.reply_text("⚠️ Only group administrators can start a quiz battle in this group.")
+        await update.message.reply_text(ADMIN_REQUIRED_MESSAGE)
         return
 
     # Check if a game is already active in this group
@@ -208,6 +203,7 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+@require_group_admin
 async def stopquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stopquiz to terminate an ongoing game."""
     chat = update.effective_chat
@@ -226,8 +222,9 @@ async def stopquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Requirement 8: Must be group admin to stop quiz
     if not await is_user_group_admin(context.bot, chat, user.id):
         if update.message:
-            await update.message.reply_text("⚠️ Only group administrators can stop the quiz battle.")
+            await update.message.reply_text(ADMIN_REQUIRED_MESSAGE)
         return
+
 
     user_name = user.first_name if user else "Admin"
     manager.stop_game(chat.id)
@@ -335,7 +332,7 @@ async def start_game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Requirement 8: Only group admin can start the battle
     if not await is_user_group_admin(context.bot, chat, user.id):
-        await query.answer("⚠️ Only a Group Admin can start the battle!", show_alert=True)
+        await query.answer("You should be an admin to run this command!", show_alert=True)
         return
 
     await query.answer("Starting battle! 🚀")
@@ -385,7 +382,7 @@ async def cancel_game_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Requirement 8: Only group admin can cancel the battle
     if not await is_user_group_admin(context.bot, chat, user.id):
-        await query.answer("⚠️ Only a Group Admin can cancel the battle!", show_alert=True)
+        await query.answer("You should be an admin to run this command!", show_alert=True)
         return
 
     manager.stop_game(chat.id)
@@ -406,8 +403,9 @@ async def launch_selected_quiz_callback(update: Update, context: ContextTypes.DE
 
     # Requirement 8: Only group admin can launch a quiz
     if not await is_user_group_admin(context.bot, chat, user.id):
-        await query.answer("⚠️ Only group administrators can launch a quiz!", show_alert=True)
+        await query.answer("You should be an admin to run this command!", show_alert=True)
         return
+
 
     await query.answer()
     quiz_set_id = int(query.data.split("_")[-1])

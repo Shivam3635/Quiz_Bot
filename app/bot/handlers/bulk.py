@@ -19,6 +19,7 @@ from app.parser.parser import QuizBotProParser
 from app.services.quiz_service import QuizService
 from app.extractors import DocumentRouter
 from app.services.session_service import session_manager
+from app.bot.handlers.common import require_group_admin
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -75,12 +76,24 @@ def format_bulk_prompt_message(settings: QuizSettings) -> str:
     )
 
 
+@require_group_admin
 async def start_quiz_session_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start or resume a multi-part quiz creation session by prompting for title."""
     user = update.effective_user
     chat = update.effective_chat
     user_id = user.id if user else 0
     chat_id = chat.id if chat else 0
+
+    if chat and chat.type in ("group", "supergroup"):
+        bot_username = context.bot.username or "my_bulk_quiz_bot"
+        if update.message:
+            await update.message.reply_text(
+                "ℹ️ <b>Quiz Creation is a Private Chat Feature</b>\n\n"
+                f"Please open a private chat with @{bot_username} to create quizzes.\n"
+                "In groups, you can launch quizzes using <code>/startquiz &lt;quiz_id&gt;</code>!",
+                parse_mode=ParseMode.HTML,
+            )
+        return ConversationHandler.END
 
     query = update.callback_query
     if query:
@@ -1075,6 +1088,7 @@ async def creation_timer_callback(update: Update, context: ContextTypes.DEFAULT_
     return ConversationHandler.END
 
 
+@require_group_admin
 async def cancel_quiz_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Safely cancel quiz creation session and return to main menu."""
     user_id = update.effective_user.id if update.effective_user else 0

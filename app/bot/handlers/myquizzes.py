@@ -23,6 +23,7 @@ from app.database.repositories import (
 )
 from app.services.publishing_service import PublishingService, PublishingSummary
 from app.services.telegram_service import TelegramService
+from app.bot.handlers.common import require_group_admin
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -32,10 +33,23 @@ telegram_service = TelegramService()
 PER_PAGE = 10
 
 
+@require_group_admin
 async def my_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Entry point for /myquizzes dashboard displaying user's saved quizzes."""
     user = update.effective_user
+    chat = update.effective_chat
     user_id = user.id if user else 0
+
+    if chat and chat.type in ("group", "supergroup"):
+        bot_username = context.bot.username or "my_bulk_quiz_bot"
+        if update.message:
+            await update.message.reply_text(
+                "ℹ️ <b>My Quizzes Dashboard is a Private Feature</b>\n\n"
+                f"Please open a private chat with @{bot_username} to view and manage your quizzes.\n"
+                "In groups, launch a quiz with <code>/startquiz &lt;quiz_id&gt;</code>!",
+                parse_mode=ParseMode.HTML,
+            )
+        return
 
     query = update.callback_query
     if query:

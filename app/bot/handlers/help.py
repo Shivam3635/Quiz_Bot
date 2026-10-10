@@ -4,6 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
+from app.bot.handlers.common import require_group_admin
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -30,6 +31,7 @@ HELP_MESSAGE = (
 )
 
 
+@require_group_admin
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /help command or help callback button with clear, brief guidance."""
     help_keyboard = InlineKeyboardMarkup(
@@ -58,6 +60,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             logger.debug("Minor edit text exception: %s", e)
 
 
+@require_group_admin
 async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send comprehensive official QuizBotPro PDF User Guide."""
     chat_id = update.effective_chat.id if update.effective_chat else (update.effective_user.id if update.effective_user else None)
@@ -108,6 +111,7 @@ async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             pass
 
 
+@require_group_admin
 async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send ready-to-use sample Excel spreadsheet template (.xlsx)."""
     chat_id = update.effective_chat.id if update.effective_chat else (update.effective_user.id if update.effective_user else None)
