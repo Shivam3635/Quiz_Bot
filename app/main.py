@@ -256,7 +256,7 @@ def create_bot_app() -> Application:
             CommandHandler(["newquiz", "bulk"], start_quiz_session_flow),
             CallbackQueryHandler(cancel_quiz_creation, pattern="^action_cancel$"),
             CommandHandler("cancel", cancel_quiz_creation),
-            CommandHandler("start", start_command),
+            CommandHandler(["start", "startgroup"], start_command),
         ],
         per_user=True,
         per_chat=True,
@@ -266,7 +266,7 @@ def create_bot_app() -> Application:
     application.add_handler(bulk_conv_handler)
 
     # Standard command handlers
-    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler(["start", "startgroup"], start_command))
     application.add_handler(CommandHandler("newquiz", start_quiz_session_flow))
     application.add_handler(CommandHandler("myquizzes", my_quizzes_command))
     application.add_handler(CommandHandler("template", template_command))

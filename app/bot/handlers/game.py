@@ -106,7 +106,7 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 [
                     InlineKeyboardButton(
                         "🎮 Add to Group & Start Battle",
-                        url=f"https://t.me/{bot_username}?startgroup=quiz_{quiz_id}&admin=delete_messages+pin_messages",
+                        url=f"https://t.me/{bot_username}?startgroup=quiz_{quiz_id}",
                     )
                 ],
                 [
@@ -142,7 +142,7 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             kb_rows.append([
                 InlineKeyboardButton(
                     f"🎮 {qs.title[:22]} ({len(qs.questions)} Qs)",
-                    url=f"https://t.me/{bot_username}?startgroup=quiz_{qs.id}&admin=delete_messages+pin_messages",
+                    url=f"https://t.me/{bot_username}?startgroup=quiz_{qs.id}",
                 )
             ])
         await update.message.reply_text(
