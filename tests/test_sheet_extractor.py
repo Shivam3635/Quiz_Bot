@@ -246,3 +246,23 @@ def test_multi_sheet_excel_workbook_picks_questions_sheet():
     assert len(result.questions) == 1
     assert result.questions[0].question_text == "Is the Earth round?"
 
+
+
+def test_bilingual_option_deduplication_and_explanation_extraction():
+    csv_content = """Question,Hindi Question,Option A,Option B,Option C,Option D,Hindi Option A,Hindi Option B,Hindi Option C,Hindi Option D,Answer
+How many types of North are there on a map?,मानचित्र पर North कितने प्रकार के होते हैं?,2,"3 (True, Magnetic, Grid)",1,4,2,"3 (True, Magnetic, Grid)",1,4,B
+"""
+    file_bytes = csv_content.encode("utf-8")
+    extractor = SheetExtractor()
+    result = extractor.extract(file_bytes, "test_north.csv")
+
+    assert result.success is True
+    assert len(result.questions) == 1
+    q = result.questions[0]
+    # Check options are NOT duplicated like '2 (2)'
+    assert q.options[0] == "2"
+    assert q.options[1] == "3"
+    assert q.options[2] == "1"
+    assert q.options[3] == "4"
+    # Check explanation is smartly extracted
+    assert q.explanation == "True, Magnetic, Grid"

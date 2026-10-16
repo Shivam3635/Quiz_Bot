@@ -287,7 +287,16 @@ class SheetExtractor(BaseExtractor):
                     if key in options_hindi and options_hindi[key] < len(row):
                         hin_val = row[options_hindi[key]].strip()
                         if hin_val:
-                            val = f"{val} ({hin_val})"
+                            v_clean = re.sub(r"\s+", " ", val).strip()
+                            h_clean = re.sub(r"\s+", " ", hin_val).strip()
+                            if v_clean.lower() == h_clean.lower():
+                                val = v_clean
+                            elif f"({h_clean})" in v_clean or h_clean in v_clean:
+                                val = v_clean
+                            elif f"({v_clean})" in h_clean or v_clean in h_clean:
+                                val = h_clean
+                            else:
+                                val = f"{v_clean} ({h_clean})"
                     options.append(val)
 
         # If options weren't in dedicated columns, check for standard remaining columns
@@ -318,6 +327,18 @@ class SheetExtractor(BaseExtractor):
             num_str = row[qnum_idx].strip()
             if num_str.isdigit():
                 q_num = int(num_str)
+
+        # Smart extraction: If explanation column was empty or omitted,
+        # but an option contains an embedded explanation (e.g. '3 (True, Magnetic, Grid)' while other options are '1', '2', '4'),
+        # extract the explanation to activate Telegram's 💡 lightbulb feature.
+        if not explanation and options:
+            paren_matches = [re.match(r"^(\d+|[A-Za-z0-9\s]+?)\s*[\(\-]\s*([^\)]+)[\)]?\s*$", o.strip()) for o in options]
+            valid_m = [m for m in paren_matches if m is not None]
+            if len(valid_m) == 1:
+                target_m = valid_m[0]
+                opt_idx = paren_matches.index(target_m)
+                options[opt_idx] = target_m.group(1).strip()
+                explanation = target_m.group(2).strip()
 
         return ExtractedQuestion(
             question_text=question_text,
