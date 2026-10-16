@@ -53,7 +53,7 @@ def get_quiz_details_keyboard(quiz_set_id: int, bot_username: str | None = None)
 
     if bot_username:
         keyboard.append([
-            InlineKeyboardButton("🎮 Play in Group Battle", url=f"https://t.me/{bot_username}?startgroup=quiz_{quiz_set_id}"),
+            InlineKeyboardButton("🎮 Play in Group Battle", url=f"https://t.me/{bot_username}?startgroup=quiz_{quiz_set_id}&admin=delete_messages+pin_messages"),
         ])
     else:
         keyboard.append([

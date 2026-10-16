@@ -121,6 +121,33 @@ async def post_init(application: Application) -> None:
     except Exception as e:
         logger.warning("Failed to register bot commands with Telegram: %s", e)
 
+    # Register default administrator rights for groups
+    try:
+        from telegram import ChatAdministratorRights
+        default_group_rights = ChatAdministratorRights(
+            is_anonymous=False,
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_manage_video_chats=False,
+            can_restrict_members=False,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_post_stories=False,
+            can_edit_stories=False,
+            can_delete_stories=False,
+            can_post_messages=True,
+            can_pin_messages=True,
+            can_manage_topics=False,
+        )
+        await application.bot.set_my_default_administrator_rights(
+            rights=default_group_rights,
+            for_channels=False,
+        )
+        logger.info("Default group administrator rights registered successfully.")
+    except Exception as e:
+        logger.warning("Failed to register default administrator rights: %s", e)
+
 
 def create_bot_app() -> Application:
     """Build and configure the Telegram Bot Application with complete handlers."""

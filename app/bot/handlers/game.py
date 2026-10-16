@@ -101,12 +101,12 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if chat.type == ChatType.PRIVATE:
         if args and args[0].isdigit():
             quiz_id = int(args[0])
-            bot_username = context.bot.username or "QuizBotPro"
+            bot_username = context.bot.username or "my_pro_quiz_bot"
             kb = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
                         "🎮 Add to Group & Start Battle",
-                        url=f"https://t.me/{bot_username}?startgroup=quiz_{quiz_id}",
+                        url=f"https://t.me/{bot_username}?startgroup=quiz_{quiz_id}&admin=delete_messages+pin_messages",
                     )
                 ],
                 [
@@ -136,13 +136,13 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        bot_username = context.bot.username or "QuizBotPro"
+        bot_username = context.bot.username or "my_pro_quiz_bot"
         kb_rows = []
         for qs in quiz_sets:
             kb_rows.append([
                 InlineKeyboardButton(
                     f"🎮 {qs.title[:22]} ({len(qs.questions)} Qs)",
-                    url=f"https://t.me/{bot_username}?startgroup=quiz_{qs.id}",
+                    url=f"https://t.me/{bot_username}?startgroup=quiz_{qs.id}&admin=delete_messages+pin_messages",
                 )
             ])
         await update.message.reply_text(
