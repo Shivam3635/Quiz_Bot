@@ -25,6 +25,8 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+QUESTION_TRANSITION_GAP: float = 3.0  # seconds between questions (matches official QuizBot pacing)
+
 
 @dataclass
 class ParticipantScore:
@@ -68,6 +70,7 @@ class GameSession:
     round_correct: dict[int, float] = field(default_factory=dict)  # user_id -> time_taken
     round_all_answers: set[int] = field(default_factory=set)  # user_ids who answered current question
     task: Optional[asyncio.Task] = None
+    transition_gap: float = QUESTION_TRANSITION_GAP
 
     def add_participant(self, user_id: int, full_name: str, username: Optional[str] = None) -> bool:
         """Add user to lobby participants. Returns True if newly added."""
@@ -364,7 +367,17 @@ async def run_game_loop(bot: Bot, game: GameSession) -> None:
             # Clean up poll mapping
             manager.poll_to_chat.pop(poll_msg.poll.id, None)
 
-            # Next question starts immediately when timer ends (Requirement 7: no tracking messages in between)
+            # Breathing gap between questions (matches official QuizBot pacing)
+            # Allows users to review the correct answer and explanation before the next question or podium
+            if game.status == "running" and game.transition_gap > 0:
+                elapsed = 0.0
+                step = 0.5
+                while elapsed < game.transition_gap:
+                    if game.status != "running":
+                        break
+                    sleep_dur = min(step, game.transition_gap - elapsed)
+                    await asyncio.sleep(sleep_dur)
+                    elapsed += sleep_dur
 
         # Final Leaderboard
         if game.status == "running":

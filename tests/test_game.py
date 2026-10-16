@@ -212,6 +212,7 @@ async def test_run_game_loop_full_cycle(sample_game_questions):
         description=None,
         questions=sample_game_questions,
         time_limit=5,  # 5s
+        transition_gap=0.05,
     )
     session.add_participant(user_id=1, full_name="Player 1")
 
@@ -286,3 +287,39 @@ def test_game_keyboards():
     sel_cbs = [btn.callback_data for row in sel_kb.inline_keyboard for btn in row]
     assert "game_launch_7" in sel_cbs
     assert "game_cancel_selection" in sel_cbs
+
+
+@pytest.mark.asyncio
+async def test_game_loop_transition_gap(sample_game_questions):
+    """Verify game loop observes the transition gap between questions."""
+    import time
+    mock_bot = MagicMock(spec=Bot)
+    mock_poll = MagicMock(spec=Poll)
+    mock_poll.id = "mock_poll_gap"
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.message_id = 100
+    mock_msg.poll = mock_poll
+
+    mock_bot.send_poll = AsyncMock(return_value=mock_msg)
+    mock_bot.stop_poll = AsyncMock()
+    mock_bot.send_message = AsyncMock()
+
+    session = GameSession(
+        chat_id=-100999,
+        chat_title="Battle Arena",
+        quiz_set_id=1,
+        title="Quick Quiz",
+        description=None,
+        questions=sample_game_questions[:1],
+        time_limit=1,
+        transition_gap=0.6,
+    )
+    session.add_participant(user_id=1, full_name="Player 1")
+    session.round_all_answers.add(1)
+
+    t0 = time.time()
+    await run_game_loop(mock_bot, session)
+    t1 = time.time()
+
+    assert session.status == "finished"
+    assert (t1 - t0) >= 0.5
