@@ -41,7 +41,7 @@ async def my_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = user.id if user else 0
 
     if chat and chat.type in ("group", "supergroup"):
-        bot_username = context.bot.username or "my_bulk_quiz_bot"
+        bot_username = context.bot.username or "my_pro_quiz_bot"
         if update.message:
             await update.message.reply_text(
                 "ℹ️ <b>My Quizzes Dashboard is a Private Feature</b>\n\n"

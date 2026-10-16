@@ -62,7 +62,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # In groups/supergroups without a deep link payload: display group command guidance
     if chat and chat.type in ("group", "supergroup"):
-        bot_username = context.bot.username or "my_bulk_quiz_bot"
+        bot_username = context.bot.username or "my_pro_quiz_bot"
         if update.message:
             await update.message.reply_text(
                 "👋 <b>QuizBotPro Group Mode</b>\n\n"

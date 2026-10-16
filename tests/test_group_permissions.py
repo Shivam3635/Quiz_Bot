@@ -125,7 +125,7 @@ async def test_admin_allowed_on_start_command_in_group():
     context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
     context.args = []
     context.bot = AsyncMock()
-    context.bot.username = "my_bulk_quiz_bot"
+    context.bot.username = "my_pro_quiz_bot"
 
     await start_command(update, context)
 

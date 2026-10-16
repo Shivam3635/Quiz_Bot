@@ -85,7 +85,7 @@ async def start_quiz_session_flow(update: Update, context: ContextTypes.DEFAULT_
     chat_id = chat.id if chat else 0
 
     if chat and chat.type in ("group", "supergroup"):
-        bot_username = context.bot.username or "my_bulk_quiz_bot"
+        bot_username = context.bot.username or "my_pro_quiz_bot"
         if update.message:
             await update.message.reply_text(
                 "ℹ️ <b>Quiz Creation is a Private Chat Feature</b>\n\n"
