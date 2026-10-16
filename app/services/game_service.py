@@ -25,7 +25,7 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-QUESTION_TRANSITION_GAP: float = 3.0  # seconds between questions (matches official QuizBot pacing)
+QUESTION_TRANSITION_GAP: float = 2.0  # seconds between questions (matches official QuizBot pacing)
 
 
 @dataclass
