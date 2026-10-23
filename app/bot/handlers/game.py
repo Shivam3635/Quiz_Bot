@@ -258,6 +258,9 @@ async def join_game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         username=user.username,
     )
 
+    if context.chat_data is not None:
+        context.chat_data.setdefault("seen_members", {})[user.id] = (user.username, user.first_name)
+
     if not added:
         await query.answer("You already voted ready! 👍")
         return
@@ -469,3 +472,94 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
         selected_option=selected_option,
         correct_option=current_q.correct_option,
     )
+
+
+@require_group_admin
+async def mention_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mention all group members/admins to announce a quiz is starting."""
+    chat = update.effective_chat
+    if not chat or not update.message:
+        return
+
+    chat_type = getattr(chat, "type", None)
+    if chat_type not in (ChatType.GROUP, ChatType.SUPERGROUP, "group", "supergroup"):
+        await update.message.reply_text(
+            "ℹ️ The <code>/all</code> command can only be used inside groups!",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Extract optional custom message passed after /all
+    text = update.message.text or ""
+    parts = text.split(maxsplit=1)
+    custom_message = parts[1].strip() if len(parts) > 1 else None
+
+    # Fetch administrators
+    members_to_mention = {}
+    try:
+        admins = await context.bot.get_chat_administrators(chat.id)
+        for admin in admins:
+            if admin.user and not admin.user.is_bot:
+                members_to_mention[admin.user.id] = (admin.user.username, admin.user.first_name)
+    except Exception as e:
+        logger.warning("Could not fetch chat administrators for /all in chat %s: %s", chat.id, e)
+
+    # Include any players in active game lobby
+    manager = get_game_manager()
+    game = manager.get_game(chat.id)
+    if game:
+        for p_id, p in game.participants.items():
+            members_to_mention[p_id] = (p.username, p.name)
+
+    # Include any members seen in this chat
+    if context.chat_data:
+        seen = context.chat_data.get("seen_members", {})
+        for m_id, (m_user, m_name) in seen.items():
+            if m_id not in members_to_mention:
+                members_to_mention[m_id] = (m_user, m_name)
+
+    # Announcement text
+    header = (
+        f"📢 <b>Quiz Alert!</b>\n\n"
+        f"{html.escape(custom_message)}\n\n"
+        if custom_message
+        else (
+            "📢 <b>Quiz Battle Alert!</b> 🎯\n\n"
+            "The quiz is about to begin! Join the battle and test your knowledge! 🚀\n\n"
+        )
+    )
+
+    if not members_to_mention:
+        await update.message.reply_text(header, parse_mode=ParseMode.HTML)
+        return
+
+    # Format mentions in chunks
+    mention_tokens = []
+    for uid, (uname, fname) in members_to_mention.items():
+        if uname:
+            mention_tokens.append(f"@{uname}")
+        else:
+            safe_name = html.escape(fname or "Player")
+            mention_tokens.append(f'<a href="tg://user?id={uid}">{safe_name}</a>')
+
+    chunk_size = 6
+    chunks = [mention_tokens[i:i + chunk_size] for i in range(0, len(mention_tokens), chunk_size)]
+
+    reply_markup = None
+    if game and game.status == "lobby":
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🎮 Join Quiz Battle ({len(game.participants)})", callback_data=f"game_join_{game.quiz_set_id}")],
+        ])
+
+    first_chunk = chunks[0]
+    msg_text = f"{header}👥 <b>Attention:</b> " + " ".join(first_chunk)
+    await update.message.reply_text(msg_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    for chunk in chunks[1:]:
+        await asyncio.sleep(0.5)
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=" ".join(chunk),
+            parse_mode=ParseMode.HTML,
+        )
+

@@ -53,6 +53,7 @@ from app.bot.handlers import (
     join_game_callback,
     jump_next_invalid_callback,
     launch_selected_quiz_callback,
+    mention_all_command,
     multipart_done_callback,
     my_quizzes_command,
     my_quizzes_page_callback,
@@ -111,6 +112,7 @@ async def post_init(application: Application) -> None:
         BotCommand("myquizzes", "View saved quizzes & 1-click re-publish"),
         BotCommand("startquiz", "Launch a live group quiz battle"),
         BotCommand("stopquiz", "Stop active group quiz battle"),
+        BotCommand("all", "Notify group members that quiz is starting"),
         BotCommand("bulk", "Multi-part bulk quiz creation"),
         BotCommand("template", "Download Excel (.xlsx) quiz spreadsheet template"),
         BotCommand("guide", "Download complete official PDF user guide"),
@@ -278,6 +280,7 @@ def create_bot_app() -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("startquiz", startquiz_command))
     application.add_handler(CommandHandler("stopquiz", stopquiz_command))
+    application.add_handler(CommandHandler(["all", "tagall", "mentionall"], mention_all_command))
 
     # Guide and Template download callbacks
     application.add_handler(CallbackQueryHandler(guide_command, pattern="^action_download_guide$"))

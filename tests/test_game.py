@@ -323,3 +323,101 @@ async def test_game_loop_transition_gap(sample_game_questions):
 
     assert session.status == "finished"
     assert (t1 - t0) >= 0.5
+
+
+@pytest.mark.asyncio
+async def test_mention_all_command_private_chat():
+    """Verify /all informs the user when invoked in a private chat."""
+    from app.bot.handlers.game import mention_all_command
+
+    update = MagicMock()
+    update.effective_chat.type = "private"
+    update.effective_chat.id = 123
+    update.message = AsyncMock()
+    context = MagicMock()
+
+    await mention_all_command(update, context)
+    update.message.reply_text.assert_called_once()
+    assert "groups" in update.message.reply_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_mention_all_command_in_group():
+    """Verify /all fetches administrators and tags them in a group chat."""
+    from app.bot.handlers.game import mention_all_command
+
+    update = MagicMock()
+    update.effective_chat.type = "supergroup"
+    update.effective_chat.id = -10012345
+    update.effective_user.id = 111
+    update.message = AsyncMock()
+    update.message.text = "/all"
+
+    # Mock admin status check
+    mock_member = MagicMock()
+    mock_member.status = "administrator"
+    update.effective_chat.get_member = AsyncMock(return_value=mock_member)
+
+    # Mock get_chat_administrators
+    admin1 = MagicMock()
+    admin1.user.is_bot = False
+    admin1.user.id = 111
+    admin1.user.username = "admin_one"
+    admin1.user.first_name = "Admin One"
+
+    admin2 = MagicMock()
+    admin2.user.is_bot = False
+    admin2.user.id = 222
+    admin2.user.username = None
+    admin2.user.first_name = "Admin Two"
+
+    bot_admin = MagicMock()
+    bot_admin.user.is_bot = True
+
+    context = MagicMock()
+    context.bot.get_chat_administrators = AsyncMock(return_value=[admin1, admin2, bot_admin])
+    context.chat_data = {"seen_members": {333: ("player_three", "Player Three")}}
+
+    await mention_all_command(update, context)
+
+    update.message.reply_text.assert_called_once()
+    sent_text = update.message.reply_text.call_args[0][0]
+    assert "@admin_one" in sent_text
+    assert "tg://user?id=222" in sent_text
+    assert "@player_three" in sent_text
+    assert "Quiz Battle Alert" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_mention_all_command_custom_message():
+    """Verify /all with custom message displays the custom note."""
+    from app.bot.handlers.game import mention_all_command
+
+    update = MagicMock()
+    update.effective_chat.type = "group"
+    update.effective_chat.id = -100999
+    update.effective_user.id = 999
+    update.message = AsyncMock()
+    update.message.text = "/all Starting in 2 minutes, get ready!"
+
+    mock_member = MagicMock()
+    mock_member.status = "creator"
+    update.effective_chat.get_member = AsyncMock(return_value=mock_member)
+
+    admin = MagicMock()
+    admin.user.is_bot = False
+    admin.user.id = 999
+    admin.user.username = "creator_user"
+    admin.user.first_name = "Creator"
+
+    context = MagicMock()
+    context.bot.get_chat_administrators = AsyncMock(return_value=[admin])
+    context.chat_data = {}
+
+    await mention_all_command(update, context)
+
+    update.message.reply_text.assert_called_once()
+    sent_text = update.message.reply_text.call_args[0][0]
+    assert "Starting in 2 minutes, get ready!" in sent_text
+    assert "@creator_user" in sent_text
+
