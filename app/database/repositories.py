@@ -40,18 +40,8 @@ def save_quiz_batch(
     description: Optional[str] = None,
 ) -> QuizSet:
     """Persist a parsed quiz batch with settings into the database."""
-    quiz_set = QuizSet(user_id=user_id, title=title or "Bulk Quiz Batch", description=description, status="ready")
+    quiz_set = QuizSet(user_id=user_id, title=title, description=description, status="ready")
     db.add(quiz_set)
-    db.flush()
-
-    # Automatically prefix the unique quiz number to the title if not already present
-    quiz_num_str = f"Quiz #{quiz_set.id}"
-    if not quiz_set.title or quiz_set.title in ("Bulk Quiz Batch", "Untitled Quiz Set", "Quiz"):
-        quiz_set.title = quiz_num_str
-    elif f"#{quiz_set.id}" not in quiz_set.title:
-        quiz_set.title = f"{quiz_num_str} - {quiz_set.title}"
-        if len(quiz_set.title) > 255:
-            quiz_set.title = quiz_set.title[:252] + "..."
     db.flush()
 
     # Save Settings
@@ -281,10 +271,7 @@ def update_quiz_set_settings(db: Session, quiz_set_id: int, settings: QuizSettin
     if not quiz_set:
         return
     if settings.title:
-        new_title = settings.title
-        if f"#{quiz_set_id}" not in new_title:
-            new_title = f"Quiz #{quiz_set_id} - {new_title}"
-        quiz_set.title = new_title[:255]
+        quiz_set.title = settings.title
     if settings.description is not None:
         quiz_set.description = settings.description
 

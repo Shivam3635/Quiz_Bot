@@ -16,9 +16,8 @@ def get_my_quizzes_keyboard(
     # Individual quiz set buttons
     for idx, qs in enumerate(quiz_sets, start=page * per_page + 1):
         q_count = len(qs.questions)
-        title_str = qs.title if f"#{qs.id}" in qs.title else f"Quiz #{qs.id} - {qs.title}"
-        title_snippet = title_str[:26] + "..." if len(title_str) > 26 else title_str
-        btn_text = f"{title_snippet} ({q_count} Qs)"
+        title_snippet = qs.title[:24] + "..." if len(qs.title) > 24 else qs.title
+        btn_text = f"{idx}. {title_snippet} ({q_count} Qs)"
         keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"view_quiz_{qs.id}")])
 
     # Pagination controls

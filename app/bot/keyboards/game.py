@@ -23,11 +23,10 @@ def get_select_quiz_for_game_keyboard(quiz_sets: list[QuizSet]) -> InlineKeyboar
     keyboard: list[list[InlineKeyboardButton]] = []
     for qs in quiz_sets:
         q_count = len(qs.questions)
-        title_str = qs.title if f"#{qs.id}" in qs.title else f"Quiz #{qs.id} - {qs.title}"
-        title_snippet = title_str[:26] + "..." if len(title_str) > 26 else title_str
+        title_snippet = qs.title[:24] + "..." if len(qs.title) > 24 else qs.title
         keyboard.append([
             InlineKeyboardButton(
-                f"🎮 {title_snippet} ({q_count} Qs)",
+                f"🎯 {title_snippet} ({q_count} Qs)",
                 callback_data=f"game_launch_{qs.id}",
             )
         ])

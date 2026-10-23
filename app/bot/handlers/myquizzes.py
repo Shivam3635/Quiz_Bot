@@ -162,10 +162,8 @@ async def view_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             else ("In progress" if last_job else "Never")
         )
 
-    header_title = title if f"#{quiz_set_id}" in title else f"Quiz #{quiz_set_id} - {title}"
     details_text = (
-        f"📖 <b>Quiz Details: {header_title}</b>\n\n"
-        f"• <b>Quiz ID:</b> <code>{quiz_set_id}</code> <i>(Launch in group: /startquiz {quiz_set_id})</i>\n"
+        f"📊 <b>Quiz Details: {title}</b>\n\n"
         f"• <b>Description:</b> <i>{desc}</i>\n"
         f"• <b>Total Questions:</b> <code>{q_count}</code>\n"
         f"• <b>Created:</b> <code>{created_str}</code>\n"
