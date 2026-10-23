@@ -79,11 +79,17 @@ from app.bot.handlers.game import (
     handle_poll_answer,
     join_game_callback,
     launch_selected_quiz_callback,
-    mention_all_command,
     replay_game_callback,
     start_game_callback,
     startquiz_command,
     stopquiz_command,
+)
+from app.bot.handlers.mention import (
+    handle_chat_member_updated,
+    mention_admin_command,
+    mention_all_command,
+    stop_mention_command,
+    track_group_member_message,
 )
 from app.bot.handlers.start import start_command
 
@@ -158,6 +164,10 @@ __all__ = [
     "startquiz_command",
     "stopquiz_command",
     "mention_all_command",
+    "stop_mention_command",
+    "mention_admin_command",
+    "track_group_member_message",
+    "handle_chat_member_updated",
     "join_game_callback",
     "start_game_callback",
     "cancel_game_callback",

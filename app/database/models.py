@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -130,4 +131,23 @@ class BattleRecord(Base):
     created_at = Column(DateTime, default=utcnow)
 
     quiz_set = relationship("QuizSet", back_populates="battles")
+
+
+class GroupMember(Base):
+    """Tracks known members in groups for @MentionBot tag-all functionality."""
+
+    __tablename__ = "group_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(BigInteger, index=True, nullable=False)
+    user_id = Column(BigInteger, index=True, nullable=False)
+    username = Column(String(255), nullable=True)
+    first_name = Column(String(255), nullable=True)
+    last_seen = Column(DateTime, default=utcnow, onupdate=utcnow)
+    is_active = Column(Boolean, default=True)
+
+    __table_args__ = (
+        UniqueConstraint("chat_id", "user_id", name="uq_group_member"),
+    )
+
 

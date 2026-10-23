@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database.models import (
     BattleRecord,
+    GroupMember,
     Option,
     PublishJob,
     Question,
@@ -293,6 +294,61 @@ def update_quiz_set_settings(db: Session, quiz_set_id: int, settings: QuizSettin
         )
         db.add(rec)
     db.commit()
+
+
+def record_group_member(
+    db: Session,
+    chat_id: int,
+    user_id: int,
+    username: Optional[str] = None,
+    first_name: Optional[str] = None,
+) -> GroupMember:
+    """Record or update an active group member for mass mentions."""
+    member = (
+        db.query(GroupMember)
+        .filter(GroupMember.chat_id == chat_id, GroupMember.user_id == user_id)
+        .first()
+    )
+    if member:
+        member.username = username
+        member.first_name = first_name
+        member.is_active = True
+        member.last_seen = datetime.now(timezone.utc)
+    else:
+        member = GroupMember(
+            chat_id=chat_id,
+            user_id=user_id,
+            username=username,
+            first_name=first_name,
+            is_active=True,
+        )
+        db.add(member)
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+def get_group_members(db: Session, chat_id: int) -> list[GroupMember]:
+    """Retrieve all active members recorded for a group."""
+    return (
+        db.query(GroupMember)
+        .filter(GroupMember.chat_id == chat_id, GroupMember.is_active == True)
+        .order_by(GroupMember.last_seen.desc())
+        .all()
+    )
+
+
+def deactivate_group_member(db: Session, chat_id: int, user_id: int) -> None:
+    """Mark a group member inactive when they leave."""
+    member = (
+        db.query(GroupMember)
+        .filter(GroupMember.chat_id == chat_id, GroupMember.user_id == user_id)
+        .first()
+    )
+    if member:
+        member.is_active = False
+        db.commit()
+
 
 
 

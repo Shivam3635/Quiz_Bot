@@ -12,6 +12,7 @@ from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -48,11 +49,13 @@ from app.bot.handlers import (
     finish_creation_settings_callback,
     fix_invalid_question_callback,
     guide_command,
+    handle_chat_member_updated,
     handle_poll_answer,
     help_command,
     join_game_callback,
     jump_next_invalid_callback,
     launch_selected_quiz_callback,
+    mention_admin_command,
     mention_all_command,
     multipart_done_callback,
     my_quizzes_command,
@@ -88,12 +91,14 @@ from app.bot.handlers import (
     start_publishing_callback,
     start_quiz_session_flow,
     startquiz_command,
+    stop_mention_command,
     stopquiz_command,
     template_command,
     toggle_anonymous_callback,
     toggle_explanation_callback,
     toggle_header_banner_callback,
     toggle_shuffle_callback,
+    track_group_member_message,
     view_quiz_callback,
 )
 from app.bot.states import QuizCreationState
@@ -112,7 +117,9 @@ async def post_init(application: Application) -> None:
         BotCommand("myquizzes", "View saved quizzes & 1-click re-publish"),
         BotCommand("startquiz", "Launch a live group quiz battle"),
         BotCommand("stopquiz", "Stop active group quiz battle"),
-        BotCommand("all", "Notify group members that quiz is starting"),
+        BotCommand("all", "Tag/notify all members about quiz (@MentionBot)"),
+        BotCommand("admin", "Tag all group administrators"),
+        BotCommand("stopall", "Cancel ongoing mention sequence"),
         BotCommand("bulk", "Multi-part bulk quiz creation"),
         BotCommand("template", "Download Excel (.xlsx) quiz spreadsheet template"),
         BotCommand("guide", "Download complete official PDF user guide"),
@@ -281,6 +288,16 @@ def create_bot_app() -> Application:
     application.add_handler(CommandHandler("startquiz", startquiz_command))
     application.add_handler(CommandHandler("stopquiz", stopquiz_command))
     application.add_handler(CommandHandler(["all", "tagall", "mentionall"], mention_all_command))
+    application.add_handler(CommandHandler(["stopall", "cancelall", "stopmention"], stop_mention_command))
+    application.add_handler(CommandHandler("admin", mention_admin_command))
+
+    # @MentionBot-style text triggers (@all, #all, @admin, #admin) in groups
+    application.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Regex(r"^(?:@all|#all)(?:\s.*)?$"), mention_all_command))
+    application.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Regex(r"^(?:@admin|#admin)(?:\s.*)?$"), mention_admin_command))
+
+    # Track active group members for @MentionBot tag-all roster
+    application.add_handler(ChatMemberHandler(handle_chat_member_updated, ChatMemberHandler.CHAT_MEMBER))
+    application.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, track_group_member_message), group=1)
 
     # Guide and Template download callbacks
     application.add_handler(CallbackQueryHandler(guide_command, pattern="^action_download_guide$"))
