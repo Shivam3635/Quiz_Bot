@@ -257,11 +257,20 @@ async def receive_channel_dest_message(update: Update, context: ContextTypes.DEF
             msg = "🏷️ <b>Quiz title removed.</b>"
         else:
             settings.title = text[:150]
-            msg = f"🏷️ <b>Quiz Title Set:</b>\n\n<i>\"{settings.title}\"</i>"
+            msg = f"🏷️ <b>Quiz Title Set:</b>\n\n<i>\"{html.escape(settings.title)}\"</i>"
 
         context.user_data["quiz_settings"] = settings
+        quiz_set_id = context.user_data.get("saved_quiz_set_id")
+        if quiz_set_id:
+            try:
+                with SessionLocal() as db:
+                    update_quiz_set_settings(db, quiz_set_id, settings)
+            except Exception as e:
+                logger.warning("Could not sync quiz title to DB: %s", e)
+
+        continue_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "goto_settings"
         back_kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✅ Continue in Settings", callback_data="goto_settings")]]
+            [[InlineKeyboardButton("✅ Continue in Settings", callback_data=continue_cb)]]
         )
         await update.message.reply_text(msg, reply_markup=back_kb, parse_mode=ParseMode.HTML)
         return QuizCreationState.CONFIGURING_SETTINGS
@@ -274,11 +283,20 @@ async def receive_channel_dest_message(update: Update, context: ContextTypes.DEF
             msg = "📝 <b>Quiz description removed.</b>"
         else:
             settings.description = text[:500]
-            msg = f"📝 <b>Quiz Description Set:</b>\n\n<i>\"{settings.description}\"</i>"
+            msg = f"📝 <b>Quiz Description Set:</b>\n\n<i>\"{html.escape(settings.description)}\"</i>"
 
         context.user_data["quiz_settings"] = settings
+        quiz_set_id = context.user_data.get("saved_quiz_set_id")
+        if quiz_set_id:
+            try:
+                with SessionLocal() as db:
+                    update_quiz_set_settings(db, quiz_set_id, settings)
+            except Exception as e:
+                logger.warning("Could not sync quiz description to DB: %s", e)
+
+        continue_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "goto_settings"
         back_kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✅ Continue in Settings", callback_data="goto_settings")]]
+            [[InlineKeyboardButton("✅ Continue in Settings", callback_data=continue_cb)]]
         )
         await update.message.reply_text(msg, reply_markup=back_kb, parse_mode=ParseMode.HTML)
         return QuizCreationState.CONFIGURING_SETTINGS
@@ -476,6 +494,90 @@ async def config_dest_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     context.user_data["waiting_for_channel_text"] = True
     context.user_data["saved_quiz_set_id"] = quiz_set_id
+    return QuizCreationState.CONFIGURING_SETTINGS
+
+
+async def config_title_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Prompt user to edit quiz title in settings."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    parts = query.data.split("_") if query and query.data else []
+    id_tag = parts[-1] if parts else "draft"
+    quiz_set_id = int(id_tag) if id_tag.isdigit() else context.user_data.get("saved_quiz_set_id")
+
+    settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
+    if not settings.title and quiz_set_id:
+        user_id = update.effective_user.id if update.effective_user and isinstance(update.effective_user.id, int) else 0
+        with SessionLocal() as db:
+            quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
+            if quiz_set:
+                _, settings = reconstruct_quiz_data(quiz_set)
+                context.user_data["quiz_settings"] = settings
+
+    cancel_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "goto_settings"
+    cancel_kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔙 Back to Settings", callback_data=cancel_cb)]]
+    )
+    curr_title = f"<code>{html.escape(settings.title)}</code>" if settings.title else "<i>None (Untitled)</i>"
+
+    if query and query.message:
+        await query.edit_message_text(
+            "🏷️ <b>Configure Quiz Title</b>\n\n"
+            f"Current title: {curr_title}\n\n"
+            "Send your desired quiz title below (e.g. <code>General Science Mock Test</code>).\n"
+            "<i>(Send <code>none</code> to reset to Untitled)</i>",
+            reply_markup=cancel_kb,
+            parse_mode=ParseMode.HTML,
+        )
+
+    context.user_data["waiting_for_title_text"] = True
+    context.user_data["saved_quiz_set_id"] = quiz_set_id
+    context.user_data.pop("waiting_for_desc_text", None)
+    context.user_data.pop("waiting_for_channel_text", None)
+    return QuizCreationState.CONFIGURING_SETTINGS
+
+
+async def config_desc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Prompt user to edit quiz description in settings."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    parts = query.data.split("_") if query and query.data else []
+    id_tag = parts[-1] if parts else "draft"
+    quiz_set_id = int(id_tag) if id_tag.isdigit() else context.user_data.get("saved_quiz_set_id")
+
+    settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
+    if not settings.description and quiz_set_id:
+        user_id = update.effective_user.id if update.effective_user and isinstance(update.effective_user.id, int) else 0
+        with SessionLocal() as db:
+            quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
+            if quiz_set:
+                _, settings = reconstruct_quiz_data(quiz_set)
+                context.user_data["quiz_settings"] = settings
+
+    cancel_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "goto_settings"
+    cancel_kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔙 Back to Settings", callback_data=cancel_cb)]]
+    )
+    curr_desc = f"<code>{html.escape(settings.description)}</code>" if settings.description else "<i>None (No description)</i>"
+
+    if query and query.message:
+        await query.edit_message_text(
+            "📝 <b>Configure Quiz Description</b>\n\n"
+            f"Current description: {curr_desc}\n\n"
+            "Send your desired quiz description below (e.g. <code>Covers NCERT Class 10 Physics Chapter 1-3.</code>).\n"
+            "<i>(Send <code>none</code> to remove description)</i>",
+            reply_markup=cancel_kb,
+            parse_mode=ParseMode.HTML,
+        )
+
+    context.user_data["waiting_for_desc_text"] = True
+    context.user_data["saved_quiz_set_id"] = quiz_set_id
+    context.user_data.pop("waiting_for_title_text", None)
+    context.user_data.pop("waiting_for_channel_text", None)
     return QuizCreationState.CONFIGURING_SETTINGS
 
 

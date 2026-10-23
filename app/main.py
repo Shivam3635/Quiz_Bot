@@ -28,7 +28,9 @@ from app.bot.handlers import (
     confirm_delete_question_callback,
     confirm_delete_quiz_callback,
     confirm_publish_callback,
+    config_desc_callback,
     config_dest_callback,
+    config_title_callback,
     config_toggle_callback,
     continue_session_callback,
     creation_timer_callback,
@@ -202,6 +204,8 @@ def create_bot_app() -> Application:
             QuizCreationState.CONFIGURING_SETTINGS: [
                 CallbackQueryHandler(config_toggle_callback, pattern="^cfg_(timer|shuffle|anon|expl|banner)_.+$"),
                 CallbackQueryHandler(config_dest_callback, pattern="^cfg_dest_.+$"),
+                CallbackQueryHandler(config_title_callback, pattern="^cfg_title_.+$"),
+                CallbackQueryHandler(config_desc_callback, pattern="^cfg_desc_.+$"),
                 CallbackQueryHandler(finish_creation_settings_callback, pattern="^finish_creation_settings$"),
                 CallbackQueryHandler(creation_timer_callback, pattern="^creation_timer_\\d+$"),
                 CallbackQueryHandler(view_quiz_callback, pattern="^view_quiz_\\d+$"),
@@ -308,6 +312,8 @@ def create_bot_app() -> Application:
     application.add_handler(CallbackQueryHandler(edit_quiz_settings_callback, pattern="^edit_quiz_settings_\\d+$"))
     application.add_handler(CallbackQueryHandler(config_toggle_callback, pattern="^cfg_(timer|shuffle|anon|expl|banner)_.+$"))
     application.add_handler(CallbackQueryHandler(config_dest_callback, pattern="^cfg_dest_.+$"))
+    application.add_handler(CallbackQueryHandler(config_title_callback, pattern="^cfg_title_.+$"))
+    application.add_handler(CallbackQueryHandler(config_desc_callback, pattern="^cfg_desc_.+$"))
     application.add_handler(CallbackQueryHandler(finish_creation_settings_callback, pattern="^finish_creation_settings$"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_republish_dest_message))
 

@@ -1,5 +1,7 @@
 """Handlers for /myquizzes dashboard, review, and 1-click re-publishing."""
 
+import html
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
@@ -20,7 +22,9 @@ from app.database.repositories import (
     get_user_quiz_sets,
     reconstruct_quiz_data,
     update_quiz_set_questions,
+    update_quiz_set_settings,
 )
+from app.parser.models import QuizSettings
 from app.services.publishing_service import PublishingService, PublishingSummary
 from app.services.telegram_service import TelegramService
 from app.bot.handlers.common import require_group_admin
@@ -389,13 +393,112 @@ async def republish_change_dest_callback(update: Update, context: ContextTypes.D
 
 
 async def receive_republish_dest_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Handle text input when user is entering a new destination for re-publishing."""
+    """Handle text input when user is entering a new destination, title, or description outside creation flow."""
+    if not update.message or not update.message.text:
+        return False
+
+    text = update.message.text.strip()
+
+    # Case A: Editing Quiz Title from Saved Settings
+    if context.user_data.get("waiting_for_title_text"):
+        context.user_data.pop("waiting_for_title_text", None)
+        quiz_set_id = context.user_data.get("saved_quiz_set_id")
+        settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
+
+        if text.lower() in ("none", "clear", "remove", "-"):
+            settings.title = None
+            msg = "🏷️ <b>Quiz title reset to default.</b>"
+        else:
+            settings.title = text[:150]
+            msg = f"🏷️ <b>Quiz Title Updated:</b>\n\n<i>\"{html.escape(settings.title)}\"</i>"
+
+        context.user_data["quiz_settings"] = settings
+        if quiz_set_id:
+            try:
+                with SessionLocal() as db:
+                    update_quiz_set_settings(db, quiz_set_id, settings)
+            except Exception as e:
+                logger.warning("Could not sync quiz title to DB: %s", e)
+
+        continue_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "action_saved_sets"
+        buttons = [[InlineKeyboardButton("⚙️ Back to Settings", callback_data=continue_cb)]]
+        if quiz_set_id:
+            buttons.append([InlineKeyboardButton("👀 View Quiz", callback_data=f"view_quiz_{quiz_set_id}")])
+        back_kb = InlineKeyboardMarkup(buttons)
+        await update.message.reply_text(msg, reply_markup=back_kb, parse_mode=ParseMode.HTML)
+        return True
+
+    # Case B: Editing Quiz Description from Saved Settings
+    if context.user_data.get("waiting_for_desc_text"):
+        context.user_data.pop("waiting_for_desc_text", None)
+        quiz_set_id = context.user_data.get("saved_quiz_set_id")
+        settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
+
+        if text.lower() in ("none", "clear", "remove", "-"):
+            settings.description = None
+            msg = "📝 <b>Quiz description removed.</b>"
+        else:
+            settings.description = text[:500]
+            msg = f"📝 <b>Quiz Description Updated:</b>\n\n<i>\"{html.escape(settings.description)}\"</i>"
+
+        context.user_data["quiz_settings"] = settings
+        if quiz_set_id:
+            try:
+                with SessionLocal() as db:
+                    update_quiz_set_settings(db, quiz_set_id, settings)
+            except Exception as e:
+                logger.warning("Could not sync quiz description to DB: %s", e)
+
+        continue_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "action_saved_sets"
+        buttons = [[InlineKeyboardButton("⚙️ Back to Settings", callback_data=continue_cb)]]
+        if quiz_set_id:
+            buttons.append([InlineKeyboardButton("👀 View Quiz", callback_data=f"view_quiz_{quiz_set_id}")])
+        back_kb = InlineKeyboardMarkup(buttons)
+        await update.message.reply_text(msg, reply_markup=back_kb, parse_mode=ParseMode.HTML)
+        return True
+
+    # Case C: Editing Channel Destination from Saved Settings
+    if context.user_data.get("waiting_for_channel_text"):
+        context.user_data.pop("waiting_for_channel_text", None)
+        quiz_set_id = context.user_data.get("saved_quiz_set_id")
+        settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
+        bot = context.bot
+        valid, msg, chat_id = await telegram_service.validate_channel_access(bot, text)
+        if valid:
+            settings.channel_id = text
+            context.user_data["quiz_settings"] = settings
+            if quiz_set_id:
+                try:
+                    with SessionLocal() as db:
+                        update_quiz_set_settings(db, quiz_set_id, settings)
+                except Exception as e:
+                    logger.warning("Could not sync channel dest to DB: %s", e)
+            continue_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "action_saved_sets"
+            back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Back to Settings", callback_data=continue_cb)]])
+            await update.message.reply_text(
+                f"🎉 <b>Target Channel Set!</b>\n\n{msg}\nAll quizzes will be published to <b>{text}</b>.",
+                reply_markup=back_kb,
+                parse_mode=ParseMode.HTML,
+            )
+            return True
+        else:
+            retry_cb = f"edit_quiz_settings_{quiz_set_id}" if quiz_set_id else "action_saved_sets"
+            retry_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Settings", callback_data=retry_cb)]])
+            await update.message.reply_text(
+                f"{msg}\n\nPlease verify that the bot is an admin in that channel, or type another @channelusername:",
+                reply_markup=retry_kb,
+                parse_mode=ParseMode.HTML,
+            )
+            context.user_data["waiting_for_channel_text"] = True
+            return True
+
+    # Case D: Re-publishing Destination Override
     quiz_set_id = context.user_data.get("waiting_for_republish_dest_for")
-    if not quiz_set_id or not update.message or not update.message.text:
+    if not quiz_set_id:
         return False
 
     context.user_data.pop("waiting_for_republish_dest_for", None)
-    dest_text = update.message.text.strip()
+    dest_text = text
 
     if dest_text.lower() in ("this", "me", "chat", "here", "none"):
         context.user_data[f"custom_dest_{quiz_set_id}"] = None

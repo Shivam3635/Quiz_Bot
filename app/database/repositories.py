@@ -270,10 +270,10 @@ def update_quiz_set_settings(db: Session, quiz_set_id: int, settings: QuizSettin
     quiz_set = db.query(QuizSet).filter(QuizSet.id == quiz_set_id).first()
     if not quiz_set:
         return
-    if settings.title:
-        quiz_set.title = settings.title
+    if settings.title is not None:
+        quiz_set.title = settings.title.strip() if settings.title.strip() else "Untitled Quiz Set"
     if settings.description is not None:
-        quiz_set.description = settings.description
+        quiz_set.description = settings.description.strip() if settings.description.strip() else None
 
     rec = db.query(QuizSettingsRecord).filter(QuizSettingsRecord.quiz_set_id == quiz_set_id).first()
     if rec:

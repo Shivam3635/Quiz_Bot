@@ -76,6 +76,8 @@ def get_quiz_settings_config_keyboard(settings: QuizSettings, quiz_set_id: int |
     """Generate dynamic inline keyboard for comprehensive settings configuration."""
     id_tag = str(quiz_set_id) if quiz_set_id is not None else "draft"
 
+    title_display = settings.title[:18] + "..." if settings.title and len(settings.title) > 18 else (settings.title or "None (Tap to set)")
+    desc_display = settings.description[:18] + "..." if settings.description and len(settings.description) > 18 else (settings.description or "None (Tap to set)")
     timer_str = f"{settings.time_limit}s ⏱️" if settings.time_limit else "Off (No limit)"
     shuffle_str = "ON ✅" if settings.shuffle_options else "OFF ❌"
     anon_str = "ON (Anonymous) 🕶️" if settings.is_anonymous else "OFF (Public) 👤"
@@ -90,6 +92,8 @@ def get_quiz_settings_config_keyboard(settings: QuizSettings, quiz_set_id: int |
     )
 
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🏷️ Title: {title_display}", callback_data=f"cfg_title_{id_tag}")],
+        [InlineKeyboardButton(f"📝 Description: {desc_display}", callback_data=f"cfg_desc_{id_tag}")],
         [InlineKeyboardButton(f"⏱️ Timer: {timer_str}", callback_data=f"cfg_timer_{id_tag}")],
         [InlineKeyboardButton(f"🔀 Shuffle Options: {shuffle_str}", callback_data=f"cfg_shuffle_{id_tag}")],
         [InlineKeyboardButton(f"🕶️ Mode: {anon_str}", callback_data=f"cfg_anon_{id_tag}")],
@@ -98,4 +102,5 @@ def get_quiz_settings_config_keyboard(settings: QuizSettings, quiz_set_id: int |
         [InlineKeyboardButton(f"🎯 Destination: {dest_str}", callback_data=f"cfg_dest_{id_tag}")],
         [done_btn],
     ])
+
 

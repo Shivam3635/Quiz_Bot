@@ -41,7 +41,9 @@ from app.bot.handlers.publish import (
     start_publishing_callback,
 )
 from app.bot.handlers.settings import (
+    config_desc_callback,
     config_dest_callback,
+    config_title_callback,
     config_toggle_callback,
     cycle_timer_callback,
     edit_quiz_settings_callback,
@@ -116,6 +118,8 @@ __all__ = [
     "receive_channel_dest_message",
     "config_toggle_callback",
     "config_dest_callback",
+    "config_title_callback",
+    "config_desc_callback",
     "edit_quiz_settings_callback",
     "finish_creation_settings_callback",
     "format_quiz_settings_text",
