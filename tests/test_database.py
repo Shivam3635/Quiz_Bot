@@ -120,7 +120,8 @@ def test_myquizzes_repository_operations(test_db):
     sets, count = get_user_quiz_sets(test_db, telegram_id=777, limit=5, offset=0)
     assert count == 1
     assert len(sets) == 1
-    assert sets[0].title == "Geography Quickfire"
+    assert "Geography Quickfire" in sets[0].title
+    assert f"#{qs.id}" in sets[0].title
     assert sets[0].description == "Europe facts"
 
     # 2. Test get_quiz_set_by_id
@@ -137,7 +138,7 @@ def test_myquizzes_repository_operations(test_db):
     assert recon_qs[0].question == "What is the capital of France?"
     assert recon_qs[0].options == ["Berlin", "Madrid", "Paris"]
     assert recon_qs[0].correct_option == 2
-    assert recon_settings.title == "Geography Quickfire"
+    assert "Geography Quickfire" in recon_settings.title
     assert recon_settings.description == "Europe facts"
     assert recon_settings.time_limit == 15
 

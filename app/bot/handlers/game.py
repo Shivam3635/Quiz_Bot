@@ -139,9 +139,11 @@ async def startquiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         bot_username = context.bot.username or "my_pro_quiz_bot"
         kb_rows = []
         for qs in quiz_sets:
+            title_str = qs.title if f"#{qs.id}" in qs.title else f"Quiz #{qs.id} - {qs.title}"
+            title_snippet = title_str[:26] + "..." if len(title_str) > 26 else title_str
             kb_rows.append([
                 InlineKeyboardButton(
-                    f"🎮 {qs.title[:22]} ({len(qs.questions)} Qs)",
+                    f"🎮 {title_snippet} ({len(qs.questions)} Qs)",
                     url=f"https://t.me/{bot_username}?startgroup=quiz_{qs.id}",
                 )
             ])
