@@ -302,30 +302,36 @@ def record_group_member(
     user_id: int,
     username: Optional[str] = None,
     first_name: Optional[str] = None,
-) -> GroupMember:
+) -> Optional[GroupMember]:
     """Record or update an active group member for mass mentions."""
-    member = (
-        db.query(GroupMember)
-        .filter(GroupMember.chat_id == chat_id, GroupMember.user_id == user_id)
-        .first()
-    )
-    if member:
-        member.username = username
-        member.first_name = first_name
-        member.is_active = True
-        member.last_seen = datetime.now(timezone.utc)
-    else:
-        member = GroupMember(
-            chat_id=chat_id,
-            user_id=user_id,
-            username=username,
-            first_name=first_name,
-            is_active=True,
+    try:
+        member = (
+            db.query(GroupMember)
+            .filter(GroupMember.chat_id == chat_id, GroupMember.user_id == user_id)
+            .first()
         )
-        db.add(member)
-    db.commit()
-    db.refresh(member)
-    return member
+        if member:
+            if username:
+                member.username = username
+            if first_name:
+                member.first_name = first_name
+            member.is_active = True
+            member.last_seen = datetime.now(timezone.utc)
+        else:
+            member = GroupMember(
+                chat_id=chat_id,
+                user_id=user_id,
+                username=username,
+                first_name=first_name,
+                is_active=True,
+            )
+            db.add(member)
+        db.commit()
+        db.refresh(member)
+        return member
+    except Exception:
+        db.rollback()
+        return None
 
 
 def get_group_members(db: Session, chat_id: int) -> list[GroupMember]:

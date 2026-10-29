@@ -86,9 +86,12 @@ from app.bot.handlers.game import (
 )
 from app.bot.handlers.mention import (
     handle_chat_member_updated,
+    handle_my_chat_member_updated,
     mention_admin_command,
     mention_all_command,
+    mention_stop_callback,
     stop_mention_command,
+    tag_me_callback,
     track_group_member_message,
 )
 from app.bot.handlers.start import start_command
@@ -168,6 +171,9 @@ __all__ = [
     "mention_admin_command",
     "track_group_member_message",
     "handle_chat_member_updated",
+    "handle_my_chat_member_updated",
+    "tag_me_callback",
+    "mention_stop_callback",
     "join_game_callback",
     "start_game_callback",
     "cancel_game_callback",

@@ -7,7 +7,7 @@ from telegram.warnings import PTBUserWarning
 
 warnings.filterwarnings("ignore", category=PTBUserWarning)
 
-from telegram import BotCommand
+from telegram import BotCommand, Update
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -50,6 +50,7 @@ from app.bot.handlers import (
     fix_invalid_question_callback,
     guide_command,
     handle_chat_member_updated,
+    handle_my_chat_member_updated,
     handle_poll_answer,
     help_command,
     join_game_callback,
@@ -57,6 +58,7 @@ from app.bot.handlers import (
     launch_selected_quiz_callback,
     mention_admin_command,
     mention_all_command,
+    mention_stop_callback,
     multipart_done_callback,
     my_quizzes_command,
     my_quizzes_page_callback,
@@ -93,6 +95,7 @@ from app.bot.handlers import (
     startquiz_command,
     stop_mention_command,
     stopquiz_command,
+    tag_me_callback,
     template_command,
     toggle_anonymous_callback,
     toggle_explanation_callback,
@@ -297,7 +300,10 @@ def create_bot_app() -> Application:
 
     # Track active group members for @MentionBot tag-all roster
     application.add_handler(ChatMemberHandler(handle_chat_member_updated, ChatMemberHandler.CHAT_MEMBER))
-    application.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, track_group_member_message), group=1)
+    application.add_handler(ChatMemberHandler(handle_my_chat_member_updated, ChatMemberHandler.MY_CHAT_MEMBER))
+    application.add_handler(MessageHandler(filters.ChatType.GROUPS, track_group_member_message), group=1)
+    application.add_handler(CallbackQueryHandler(tag_me_callback, pattern="^mention_tag_me$"))
+    application.add_handler(CallbackQueryHandler(mention_stop_callback, pattern="^mention_stop$"))
 
     # Guide and Template download callbacks
     application.add_handler(CallbackQueryHandler(guide_command, pattern="^action_download_guide$"))
@@ -410,7 +416,7 @@ def main() -> None:
 
     app = create_bot_app()
     logger.info("All QuizBotPro bot handlers successfully registered. Starting polling...")
-    app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

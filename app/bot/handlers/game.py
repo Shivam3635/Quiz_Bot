@@ -13,7 +13,12 @@ from app.bot.keyboards.game import (
     get_select_quiz_for_game_keyboard,
 )
 from app.database.database import SessionLocal
-from app.database.repositories import get_quiz_set_by_id, get_user_quiz_sets, reconstruct_quiz_data
+from app.database.repositories import (
+    get_quiz_set_by_id,
+    get_user_quiz_sets,
+    reconstruct_quiz_data,
+    record_group_member,
+)
 from app.services.game_service import GameSession, get_game_manager, run_game_loop
 from app.utils.logger import setup_logger
 
@@ -261,6 +266,18 @@ async def join_game_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if context.chat_data is not None:
         context.chat_data.setdefault("seen_members", {})[user.id] = (user.username, user.first_name)
 
+    try:
+        with SessionLocal() as db:
+            record_group_member(
+                db=db,
+                chat_id=chat.id,
+                user_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+            )
+    except Exception:
+        pass
+
     if not added:
         await query.answer("You already voted ready! 👍")
         return
@@ -472,5 +489,17 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
         selected_option=selected_option,
         correct_option=current_q.correct_option,
     )
+
+    try:
+        with SessionLocal() as db:
+            record_group_member(
+                db=db,
+                chat_id=game.chat_id,
+                user_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+            )
+    except Exception:
+        pass
 
 
