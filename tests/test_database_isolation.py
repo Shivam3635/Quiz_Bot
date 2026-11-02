@@ -1,5 +1,6 @@
 """Tests for database isolation safeguards and runtime identity verification."""
 
+import os
 from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
@@ -12,7 +13,9 @@ from app.database.database import (
     Base,
     DatabaseIdentityError,
     DatabaseIdentityMismatchError,
+    configure_ssl_certificate_bundle,
     init_db,
+    resolve_ca_bundle_path,
     verify_database_identity,
 )
 
@@ -322,6 +325,60 @@ def test_production_development_and_testing_unaffected_by_staging_ssl_rules():
 
         test_env = Settings(_env_file=None, ENVIRONMENT="testing")
         assert test_env.DATABASE_URL == "sqlite:///quizbotpro.db"
+
+
+def test_resolve_ca_bundle_path_returns_existing_bundle():
+    """resolve_ca_bundle_path returns a valid existing file."""
+    path = resolve_ca_bundle_path()
+    assert path is not None
+    assert os.path.isfile(path)
+    assert os.path.getsize(path) > 0
+
+
+def test_resolve_ca_bundle_path_prefers_ssl_cert_file(monkeypatch, tmp_path):
+    """resolve_ca_bundle_path honors existing valid SSL_CERT_FILE environment variable."""
+    custom_ca = tmp_path / "custom_ca.pem"
+    custom_ca.write_text("DUMMY CERT", encoding="utf-8")
+    monkeypatch.setenv("SSL_CERT_FILE", str(custom_ca))
+    assert resolve_ca_bundle_path() == str(custom_ca)
+
+
+def test_resolve_ca_bundle_path_prefers_pgsslrootcert(monkeypatch, tmp_path):
+    """resolve_ca_bundle_path honors existing valid PGSSLROOTCERT when SSL_CERT_FILE is unset."""
+    custom_ca = tmp_path / "pg_ca.pem"
+    custom_ca.write_text("DUMMY CERT", encoding="utf-8")
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setenv("PGSSLROOTCERT", str(custom_ca))
+    assert resolve_ca_bundle_path() == str(custom_ca)
+
+
+def test_configure_ssl_certificate_bundle_sets_environ(monkeypatch):
+    """configure_ssl_certificate_bundle ensures SSL_CERT_FILE is set in os.environ."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    bundle = configure_ssl_certificate_bundle()
+    assert bundle is not None
+    assert os.environ.get("SSL_CERT_FILE") == bundle
+
+
+def test_staging_aborts_startup_when_ca_bundle_cannot_be_located(monkeypatch):
+    """In staging mode, failing to locate a valid root CA bundle aborts startup (fails closed)."""
+    monkeypatch.setattr("app.database.database.resolve_ca_bundle_path", lambda: None)
+    staging_settings = Settings(
+        ENVIRONMENT="staging",
+        TELEGRAM_BOT_TOKEN="123456:valid_token",
+        DATABASE_URL="postgresql://user:pass@ep-staging-123.neon.tech/neondb?sslmode=verify-full&sslrootcert=system",
+        STAGING_ALLOWED_USER_IDS="111, 222",
+        EXPECTED_DATABASE_IDENTITY="ep-staging-123.neon.tech",
+    )
+    with pytest.raises(DatabaseIdentityError) as exc:
+        configure_ssl_certificate_bundle(app_settings=staging_settings)
+    assert "Unable to locate a valid root CA certificate bundle" in str(exc.value)
+
+    mock_engine = MagicMock()
+    mock_engine.url = make_url("postgresql+psycopg2://user:pass@ep-staging-123.neon.tech/neondb?sslmode=verify-full&sslrootcert=system")
+    with pytest.raises(DatabaseIdentityError) as exc2:
+        verify_database_identity(target_engine=mock_engine, app_settings=staging_settings)
+    assert "Unable to locate a valid root CA certificate bundle" in str(exc2.value)
 
 
 # ============================================================================

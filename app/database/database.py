@@ -1,5 +1,6 @@
 """SQLAlchemy database engine and session management."""
 
+import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
@@ -19,6 +20,95 @@ class DatabaseIdentityMismatchError(DatabaseIdentityError):
     pass
 
 
+# Standard locations for trusted root CA certificate bundles across Linux distributions and macOS
+STANDARD_CA_BUNDLE_PATHS = (
+    "/etc/ssl/certs/ca-certificates.crt",                 # Debian, Ubuntu, Render
+    "/etc/pki/tls/certs/ca-bundle.crt",                   # CentOS, RHEL, Fedora, Alma, Rocky
+    "/etc/ssl/ca-bundle.pem",                             # openSUSE, SUSE
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",  # RHEL 7+, CentOS 7+
+    "/etc/ssl/cert.pem",                                  # Alpine Linux, macOS, FreeBSD
+)
+
+
+def resolve_ca_bundle_path() -> str | None:
+    """Resolve a trusted root CA certificate bundle path.
+
+    PostgreSQL libpq's `sslrootcert=system` delegates to OpenSSL's
+    `X509_STORE_set_default_paths()`. In precompiled binary wheels
+    (such as `psycopg2-binary` built on manylinux), OpenSSL's compiled-in
+    OPENSSLDIR typically points to `/etc/pki/tls`, which does not exist
+    on Debian/Ubuntu/Render (`/etc/ssl/certs/ca-certificates.crt`) or Windows.
+    This causes certificate verification to fail with:
+    `SSL error: certificate verify failed` even when the server certificate is valid.
+
+    This function locates the appropriate trusted CA bundle by checking:
+    1. Explicit `SSL_CERT_FILE` environment variable if set and exists.
+    2. Explicit `PGSSLROOTCERT` environment variable if set and exists.
+    3. Standard Linux / Unix system CA certificate bundle paths.
+    4. Mozilla root CA bundle via `certifi` (guaranteed fallback in Python).
+
+    Returns:
+        Absolute path to an existing, non-empty CA certificate bundle file,
+        or None if no bundle could be located.
+    """
+    # 1. Respect explicit SSL_CERT_FILE
+    ssl_cert_file = os.environ.get("SSL_CERT_FILE", "").strip()
+    if ssl_cert_file and os.path.isfile(ssl_cert_file) and os.path.getsize(ssl_cert_file) > 0:
+        return ssl_cert_file
+
+    # 2. Respect explicit PGSSLROOTCERT
+    pg_ssl_root_cert = os.environ.get("PGSSLROOTCERT", "").strip()
+    if pg_ssl_root_cert and os.path.isfile(pg_ssl_root_cert) and os.path.getsize(pg_ssl_root_cert) > 0:
+        return pg_ssl_root_cert
+
+    # 3. Check standard system CA certificate bundle paths
+    for system_path in STANDARD_CA_BUNDLE_PATHS:
+        if os.path.isfile(system_path) and os.path.getsize(system_path) > 0:
+            return system_path
+
+    # 4. Fallback to certifi's Mozilla root CA bundle
+    try:
+        import certifi
+        certifi_path = certifi.where()
+        if os.path.isfile(certifi_path) and os.path.getsize(certifi_path) > 0:
+            return certifi_path
+    except ImportError:
+        pass
+
+    return None
+
+
+def configure_ssl_certificate_bundle(app_settings: Settings | None = None) -> str | None:
+    """Configure runtime environment and return resolved CA certificate bundle path.
+
+    Ensures that `SSL_CERT_FILE` is populated in `os.environ` so that any
+    driver or libpq call with `sslrootcert=system` can locate trusted CA
+    certificates in containerized and cloud runtimes (e.g. Render).
+
+    In staging mode, failing to locate a valid root CA bundle aborts startup
+    by raising DatabaseIdentityError. Never weakens TLS verification or falls back
+    to unverified modes.
+    """
+    current_settings = app_settings or get_settings()
+    ca_bundle = resolve_ca_bundle_path()
+    if ca_bundle:
+        if "SSL_CERT_FILE" not in os.environ or not os.environ["SSL_CERT_FILE"].strip():
+            os.environ["SSL_CERT_FILE"] = ca_bundle
+            logger.debug("Configured SSL_CERT_FILE=%s for OpenSSL/libpq certificate verification.", ca_bundle)
+        else:
+            logger.debug("Using existing SSL_CERT_FILE=%s", os.environ["SSL_CERT_FILE"])
+    else:
+        if current_settings.ENVIRONMENT == "staging":
+            raise DatabaseIdentityError(
+                "Staging startup aborted: Unable to locate a valid root CA certificate bundle for strict TLS verification (sslmode=verify-full)."
+            )
+        logger.warning(
+            "Could not locate a trusted CA certificate bundle on this system. "
+            "TLS certificate verification with 'sslrootcert=system' may fail."
+        )
+    return ca_bundle
+
+
 settings = get_settings()
 
 db_url = settings.DATABASE_URL
@@ -29,6 +119,15 @@ elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+")
 
 # Connect args needed for SQLite concurrency
 connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+
+# For PostgreSQL connections, configure CA certificate bundle to ensure reliable TLS verification
+if not db_url.startswith("sqlite"):
+    ca_bundle = configure_ssl_certificate_bundle(settings)
+    # If the connection string specifies sslrootcert=system, passing the explicit CA bundle
+    # in connect_args ensures libpq directly loads the certificate file across all platforms
+    # without relying exclusively on OpenSSL's compiled-in OPENSSLDIR search paths.
+    if ca_bundle and "sslrootcert=system" in db_url:
+        connect_args["sslrootcert"] = ca_bundle
 
 engine = create_engine(
     db_url,
@@ -253,6 +352,14 @@ def verify_database_identity(
         raise DatabaseIdentityError(
             "EXPECTED_DATABASE_IDENTITY is required when ENVIRONMENT is 'staging'."
         )
+
+    # In staging, ensure a trusted root CA certificate bundle is available
+    if current_settings.ENVIRONMENT == "staging":
+        ca_bundle = resolve_ca_bundle_path()
+        if not ca_bundle:
+            raise DatabaseIdentityError(
+                "Staging startup aborted: Unable to locate a valid root CA certificate bundle for strict TLS verification (sslmode=verify-full)."
+            )
 
     # Inspect engine URL backend and hostname
     url = current_engine.url
