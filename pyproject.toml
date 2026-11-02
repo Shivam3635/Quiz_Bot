@@ -11,6 +11,12 @@ dependencies = [
     "pydantic-settings>=2.2.0",
     "python-dotenv>=1.0.0",
     "sqlalchemy>=2.0.25",
+    "psycopg2-binary>=2.9.9",
+    "openpyxl>=3.1.0",
+    "python-docx>=1.1.0",
+    "pypdf>=4.0.0",
+    "google-genai>=2.0.0",
+    "pillow>=10.0.0",
     "reportlab>=4.0.0",
 ]
 
@@ -30,6 +36,7 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore::telegram.warnings.PTBUserWarning",
 ]
