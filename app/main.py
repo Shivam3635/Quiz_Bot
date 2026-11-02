@@ -18,6 +18,7 @@ from telegram.ext import (
     ConversationHandler,
     MessageHandler,
     PollAnswerHandler,
+    TypeHandler,
     filters,
 )
 
@@ -104,9 +105,10 @@ from app.bot.handlers import (
     track_group_member_message,
     view_quiz_callback,
 )
+from app.bot.middleware import staging_security_gatekeeper
 from app.bot.states import QuizCreationState
 from app.config.settings import get_settings
-from app.database.database import init_db
+from app.database.database import DatabaseIdentityError, init_db
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -167,11 +169,19 @@ def create_bot_app() -> Application:
     """Build and configure the Telegram Bot Application with complete handlers."""
     settings = get_settings()
 
-    # Ensure database tables exist
+    # Ensure database tables exist after verifying database identity
     try:
         init_db()
         logger.info("Database initialized successfully.")
+    except DatabaseIdentityError as e:
+        logger.critical("Fatal: Database identity verification failed: %s", e)
+        raise
     except Exception as e:
+        if settings.ENVIRONMENT == "staging":
+            logger.critical("Fatal: Database initialization failed in staging: %s", e)
+            raise RuntimeError(
+                f"Staging startup aborted: database initialization failed: {e}"
+            ) from e
         logger.warning("Database init warning: %s", e)
 
     # Initialize Telegram Application with post_init hook for command registration
@@ -181,6 +191,9 @@ def create_bot_app() -> Application:
         .post_init(post_init)
         .build()
     )
+
+    # Register staging perimeter security gatekeeper in group -1 (runs before all group 0 & 1 handlers)
+    application.add_handler(TypeHandler(Update, staging_security_gatekeeper), group=-1)
 
     # Bulk Quiz Creation Multi-Part Conversation Flow
     bulk_conv_handler = ConversationHandler(
