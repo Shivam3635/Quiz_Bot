@@ -63,8 +63,6 @@ jobs:
           pytest tests/test_database_isolation.py -vv --tb=short
 
       - name: Step 3 - Run Complete Repository Test Suite
-        # Note on exclusions: tests/test_game.py is excluded from CI execution because of a confirmed
-        # pre-existing fixture defect on origin/develop where its autouse fixture (init_test_db)
-        # directly binds to the global engine and attempts a remote PostgreSQL connection.
+        # Executes all test suites across the repository with in-memory test database isolation.
         run: |
-          pytest --ignore=tests/test_game.py -q --tb=short
+          pytest -q --tb=short

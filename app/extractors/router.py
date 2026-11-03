@@ -18,6 +18,31 @@ from app.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 MAX_FILE_BYTES = 20 * 1024 * 1024  # 20MB Telegram limit
+MAX_ZIP_ENTRIES = 50
+MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50MB
+MAX_ZIP_MEMBER_UNCOMPRESSED_BYTES = 20 * 1024 * 1024  # 20MB
+MAX_COMPRESSION_RATIO = 100  # Zip-bomb protection: max 100:1 ratio for entries > 1MB
+
+
+def is_safe_zip_member(zinfo: zipfile.ZipInfo) -> tuple[bool, Optional[str]]:
+    """Validate archive member for path traversal, symlinks, and unsafe attributes."""
+    name = zinfo.filename
+
+    # Check for path traversal attempts
+    normalized = name.replace("\\", "/")
+    if normalized.startswith("/") or re.match(r"^[a-zA-Z]:", name):
+        return False, f"Absolute path rejected: '{name}'"
+
+    parts = normalized.split("/")
+    if ".." in parts:
+        return False, f"Path traversal rejected: '{name}'"
+
+    # Reject Unix symbolic links (S_IFLNK = 0o120000)
+    is_symlink = (zinfo.external_attr >> 16) & 0o170000 == 0o120000
+    if is_symlink:
+        return False, f"Symbolic link rejected: '{name}'"
+
+    return True, None
 
 
 @dataclass
@@ -192,7 +217,7 @@ class DocumentRouter:
         )
 
     def _ingest_zip(self, content: bytes, filename: str) -> ExtractionResult:
-        """Unpack ZIP archive and extract quiz questions from all contained documents."""
+        """Unpack ZIP archive with strict security bounds against zip-bombs and path traversal."""
         try:
             zf = zipfile.ZipFile(io.BytesIO(content))
         except Exception as e:
@@ -201,16 +226,122 @@ class DocumentRouter:
                 source_filename=filename,
             )
 
+        infolist = zf.infolist()
+
+        # 1. Archive entry count limit
+        if len(infolist) > MAX_ZIP_ENTRIES:
+            return ExtractionResult(
+                error_message=(
+                    f"ZIP archive contains {len(infolist)} entries, exceeding the maximum allowed "
+                    f"limit of {MAX_ZIP_ENTRIES} files."
+                ),
+                source_filename=filename,
+            )
+
+        # 2. Pre-extraction aggregate size and compression ratio checks
+        total_declared_uncompressed = 0
+        for zinfo in infolist:
+            # Check individual file uncompressed size
+            if zinfo.file_size > MAX_ZIP_MEMBER_UNCOMPRESSED_BYTES:
+                return ExtractionResult(
+                    error_message=(
+                        f"Archive entry '{zinfo.filename}' uncompressed size ({zinfo.file_size // (1024 * 1024)}MB) "
+                        f"exceeds the maximum 20MB limit."
+                    ),
+                    source_filename=filename,
+                )
+
+            # Check compression ratio for zip bomb defense and zero compressed size
+            if zinfo.compress_size == 0 and zinfo.file_size > 0:
+                return ExtractionResult(
+                    error_message=(
+                        f"Archive entry '{zinfo.filename}' has zero compressed size with non-zero uncompressed size, "
+                        "rejected for security reasons."
+                    ),
+                    source_filename=filename,
+                )
+            elif zinfo.compress_size > 0:
+                ratio = zinfo.file_size / zinfo.compress_size
+                if ratio > MAX_COMPRESSION_RATIO and zinfo.file_size > 1024 * 1024:
+                    return ExtractionResult(
+                        error_message=(
+                            f"Archive entry '{zinfo.filename}' exhibits an excessive compression ratio ({ratio:.1f}:1), "
+                            "rejected for security reasons."
+                        ),
+                        source_filename=filename,
+                    )
+
+            if not zinfo.is_dir():
+                total_declared_uncompressed += zinfo.file_size
+
+        if total_declared_uncompressed > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
+            return ExtractionResult(
+                error_message=(
+                    f"Total uncompressed content ({total_declared_uncompressed // (1024 * 1024)}MB) "
+                    f"exceeds the maximum allowed limit of {MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES // (1024 * 1024)}MB."
+                ),
+                source_filename=filename,
+            )
+
         all_questions: list[ExtractedQuestion] = []
         raw_blocks: list[str] = []
+        cumulative_extracted_bytes = 0
 
-        for member_name in zf.namelist():
+        for zinfo in infolist:
+            member_name = zinfo.filename
+
             # Skip directories and hidden / macOS metadata files
-            if member_name.endswith("/") or member_name.startswith("__MACOSX/") or member_name.startswith("."):
+            if zinfo.is_dir() or member_name.endswith("/") or member_name.startswith("__MACOSX/") or member_name.startswith("."):
                 continue
 
-            member_bytes = zf.read(member_name)
+            # Path traversal and symlink validation
+            is_safe, reject_reason = is_safe_zip_member(zinfo)
+            if not is_safe:
+                logger.warning("Skipping unsafe ZIP entry in '%s': %s", filename, reject_reason)
+                continue
+
+            # Read member bytes safely using bounded streaming reads (64KB chunks)
+            member_chunks: list[bytes] = []
+            member_extracted_bytes = 0
+
+            try:
+                with zf.open(zinfo, "r") as member_file:
+                    while True:
+                        chunk = member_file.read(64 * 1024)
+                        if not chunk:
+                            break
+                        member_extracted_bytes += len(chunk)
+
+                        # Enforce single-member decompressed limit during streaming
+                        if member_extracted_bytes > MAX_ZIP_MEMBER_UNCOMPRESSED_BYTES:
+                            return ExtractionResult(
+                                error_message=(
+                                    f"Archive entry '{member_name}' decompressed size exceeded "
+                                    f"the maximum allowed limit of {MAX_ZIP_MEMBER_UNCOMPRESSED_BYTES // (1024 * 1024)}MB."
+                                ),
+                                source_filename=filename,
+                            )
+
+                        # Enforce aggregate decompressed limit during streaming
+                        if cumulative_extracted_bytes + member_extracted_bytes > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
+                            return ExtractionResult(
+                                error_message=(
+                                    f"Total decompressed size exceeded safety limit of "
+                                    f"{MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES // (1024 * 1024)}MB during extraction."
+                                ),
+                                source_filename=filename,
+                            )
+
+                        member_chunks.append(chunk)
+            except Exception as read_err:
+                logger.warning("Could not read ZIP entry '%s': %s", member_name, read_err)
+                continue
+
+            cumulative_extracted_bytes += member_extracted_bytes
+            member_bytes = b"".join(member_chunks)
+
             sub_type = self.detect_file_type(member_name, member_bytes)
+            # Never process nested ZIP archives recursively
             if sub_type in ("excel", "csv", "word", "pdf", "text", "image"):
                 sub_summary = self.ingest(member_bytes, member_name)
                 if sub_summary.success and sub_summary.questions:
