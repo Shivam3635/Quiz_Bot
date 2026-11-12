@@ -39,7 +39,7 @@ class VisionExtractor(BaseExtractor):
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.settings = get_settings()
         self.api_key = api_key or self.settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
-        self.model_name = getattr(self.settings, "GEMINI_MODEL", "gemini-2.5-flash")
+        self.model_name = getattr(self.settings, "GEMINI_MODEL", "gemini-3.8-flash")
         self.timeout_seconds = getattr(self.settings, "GEMINI_TIMEOUT_SECONDS", 30.0)
         self.parser = BulkQuizParser()
 
