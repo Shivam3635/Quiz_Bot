@@ -570,7 +570,7 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
     try:
         tg_file = await (update.message.photo[-1].get_file() if is_photo else update.message.document.get_file())
         file_bytes = await tg_file.download_as_bytearray()
-        summary = document_router.ingest(bytes(file_bytes), filename=filename)
+        summary = await document_router.ingest_async(bytes(file_bytes), filename=filename)
     except Exception as exc:
         logger.exception("Error ingesting file %s: %s", filename, exc)
         await status_msg.edit_text(

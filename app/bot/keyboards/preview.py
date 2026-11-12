@@ -2,6 +2,7 @@
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.parser.models import QuizQuestion
+from app.parser.validator import telegram_utf16_length
 
 
 def get_preview_keyboard(
@@ -85,7 +86,7 @@ def get_edit_question_keyboard(
     current_opt_row = []
     for opt_idx, opt_text in enumerate(q.options):
         letter = chr(ord("A") + opt_idx)
-        opt_len = len(opt_text.strip())
+        opt_len = telegram_utf16_length(opt_text.strip())
         warn_tag = f" ⚠️({opt_len})" if opt_len > 100 or opt_len == 0 else ""
         current_opt_row.append(
             InlineKeyboardButton(f"✏️ Opt {letter}{warn_tag}", callback_data=f"edit_opt_{opt_idx}")
@@ -96,10 +97,10 @@ def get_edit_question_keyboard(
     if current_opt_row:
         opt_edit_rows.append(current_opt_row)
 
-    q_len = len(q.question.strip())
+    q_len = telegram_utf16_length(q.question.strip())
     q_warn = f" ⚠️ ({q_len}/300)" if q_len > 300 or q_len == 0 else ""
 
-    expl_len = len(q.explanation) if q.explanation else 0
+    expl_len = telegram_utf16_length(q.explanation) if q.explanation else 0
     expl_warn = f" ⚠️ ({expl_len}/200)" if expl_len > 200 else ""
 
     back_row = [InlineKeyboardButton("🔙 Back to Preview", callback_data="goto_preview")]
@@ -148,14 +149,57 @@ def get_publish_confirm_keyboard(total_questions: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_retry_keyboard() -> InlineKeyboardMarkup:
-    """Generate retry options for failed questions."""
-    keyboard = [
+def get_retry_keyboard(
+    has_uncertain: bool = False,
+    has_confirmed: bool = True,
+    confirmed_count: int = 0,
+) -> InlineKeyboardMarkup:
+    """
+    Generate retry options for failed questions.
+    When has_uncertain is True, provides distinct buttons to avoid accidental duplicates.
+    """
+    rows = []
+    if not has_uncertain:
+        # Standard retry: all failures are confirmed rejections
+        rows.append([InlineKeyboardButton("🔄 Retry Failed Quizzes", callback_data="retry_failed_quizzes")])
+    else:
+        # Some or all failures have uncertain delivery outcomes (timeouts)
+        if has_confirmed and confirmed_count > 0:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"🔄 Retry Confirmed Failures ({confirmed_count})",
+                        callback_data="retry_confirmed_quizzes",
+                    )
+                ]
+            )
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        "⚠️ Retry All (Including Uncertain)",
+                        callback_data="retry_with_uncertain_prompt",
+                    )
+                ]
+            )
+        else:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        "⚠️ Retry Uncertain Quizzes",
+                        callback_data="retry_with_uncertain_prompt",
+                    )
+                ]
+            )
+
+    rows.append([InlineKeyboardButton("🏠 Back to Main Menu", callback_data="action_main_menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def get_uncertain_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Generate explicit warning confirmation keyboard for retrying uncertain deliveries."""
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("🔄 Retry Failed Quizzes", callback_data="retry_failed_quizzes"),
-        ],
-        [
-            InlineKeyboardButton("🏠 Back to Main Menu", callback_data="action_main_menu"),
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+            [InlineKeyboardButton("⚠️ Yes, I Checked (Proceed with Retry)", callback_data="confirm_retry_uncertain")],
+            [InlineKeyboardButton("🔙 Cancel / Back", callback_data="back_to_failed_summary")],
+        ]
+    )

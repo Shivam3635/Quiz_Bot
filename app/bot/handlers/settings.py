@@ -306,7 +306,7 @@ async def receive_channel_dest_message(update: Update, context: ContextTypes.DEF
     valid, msg, chat_id = await telegram_service.validate_channel_access(bot, text)
 
     if valid:
-        settings.channel_id = text
+        settings.channel_id = str(chat_id) if chat_id is not None else text
         context.user_data["quiz_settings"] = settings
         context.user_data.pop("waiting_for_channel_text", None)
         quiz_set_id = context.user_data.get("saved_quiz_set_id")

@@ -31,10 +31,18 @@ class Settings(BaseSettings):
     # Telegram Publishing & Rate Limiting defaults
     MAX_OPTIONS_PER_QUESTION: int = 10
     MIN_OPTIONS_PER_QUESTION: int = 2
-    DEFAULT_DELAY_BETWEEN_POSTS: float = 1.0  # seconds between quiz creations
+    DEFAULT_DELAY_BETWEEN_POSTS: float = 2.5  # seconds between quiz creations (aligned with Telegram's 20 msgs/min per-channel limit)
+    DEFAULT_MESSAGE_PACING_INTERVAL: float = 3.0  # seconds between successive outgoing messages to the same destination chat
+    MAX_FLOOD_RETRIES: int = 3  # maximum RetryAfter flood control retry attempts per question
+    HEADER_BANNER_DELAY: float = 2.0  # seconds to pause after sending introductory header banner
+    EXTENDED_OPTION_SUB_DELAY: float = 1.0  # seconds to pause between text message and letter poll in Solution 1
 
     # AI & Multimodal OCR (Phase 5)
     GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_TIMEOUT_SECONDS: float = 30.0
+    MAX_OCR_PAGES: int = 10
+    MAX_CONCURRENT_EXTRACTIONS: int = 5
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.local"),

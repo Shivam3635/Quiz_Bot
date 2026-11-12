@@ -16,6 +16,24 @@ TELEGRAM_MIN_OPTIONS = 2
 TELEGRAM_MAX_OPTIONS = 10
 
 
+def telegram_utf16_length(text: Optional[str]) -> int:
+    """Calculate string length in UTF-16 code units (matching Telegram Bot API limits)."""
+    if not text:
+        return 0
+    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
+def has_lone_surrogates(text: Optional[str]) -> bool:
+    """Check if string contains lone surrogate code points (unencodable as UTF-8)."""
+    if not text:
+        return False
+    try:
+        text.encode("utf-8")
+        return False
+    except UnicodeEncodeError:
+        return True
+
+
 @dataclass
 class QuestionValidationError:
     """Represents a specific validation issue on a question."""
@@ -106,8 +124,17 @@ class QuizValidator:
         ext_allowed = self.allow_extended_options if allow_extended_options is None else allow_extended_options
         max_opt_len = TELEGRAM_MAX_EXTENDED_OPTION_LENGTH if ext_allowed else TELEGRAM_MAX_OPTION_LENGTH
 
-        # 1. Question text length
-        q_len = len(q.question)
+        # 1. Question text length & Unicode validity
+        if has_lone_surrogates(q.question):
+            errors.append(
+                QuestionValidationError(
+                    question_index=index,
+                    rule="MALFORMED_UNICODE",
+                    message="Question text contains invalid Unicode surrogate characters.",
+                )
+            )
+
+        q_len = telegram_utf16_length(q.question)
         if q_len == 0:
             errors.append(
                 QuestionValidationError(
@@ -150,7 +177,16 @@ class QuizValidator:
         # 3. Individual option validation & duplicate detection
         seen_options: set[str] = set()
         for opt_idx, opt in enumerate(q.options):
+            if has_lone_surrogates(opt):
+                errors.append(
+                    QuestionValidationError(
+                        question_index=index,
+                        rule="MALFORMED_UNICODE",
+                        message=f"Option {opt_idx + 1} contains invalid Unicode surrogate characters.",
+                    )
+                )
             stripped_opt = opt.strip()
+            opt_len = telegram_utf16_length(stripped_opt)
             if not stripped_opt:
                 errors.append(
                     QuestionValidationError(
@@ -159,13 +195,13 @@ class QuizValidator:
                         message=f"Option {opt_idx + 1} is empty.",
                     )
                 )
-            elif len(stripped_opt) > max_opt_len:
+            elif opt_len > max_opt_len:
                 errors.append(
                     QuestionValidationError(
                         question_index=index,
                         rule="OPTION_TOO_LONG",
                         message=(
-                            f"Option {opt_idx + 1} is {len(stripped_opt)} characters "
+                            f"Option {opt_idx + 1} is {opt_len} characters "
                             f"(limit: {max_opt_len})."
                         ),
                     )
@@ -196,9 +232,17 @@ class QuizValidator:
                 )
             )
 
-        # 5. Explanation length
+        # 5. Explanation length & Unicode validity
         if q.explanation:
-            expl_len = len(q.explanation)
+            if has_lone_surrogates(q.explanation):
+                errors.append(
+                    QuestionValidationError(
+                        question_index=index,
+                        rule="MALFORMED_UNICODE",
+                        message="Explanation contains invalid Unicode surrogate characters.",
+                    )
+                )
+            expl_len = telegram_utf16_length(q.explanation)
             if expl_len > TELEGRAM_MAX_EXPLANATION_LENGTH:
                 errors.append(
                     QuestionValidationError(

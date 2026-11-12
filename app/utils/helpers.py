@@ -10,6 +10,37 @@ ENG_TO_HINDI_RE = re.compile(r"([A-Za-z0-9][.!:;\-\'\"]+)\s+([\u0900-\u097F])")
 # Devanagari sentence with terminal punctuation followed by English/Latin character
 HINDI_TO_ENG_RE = re.compile(r"([\u0900-\u097F][।!?:;\-\'\"]+)\s+([A-Za-z])")
 
+# Hinglish question markers for Latin-script bilingual questions
+HINGLISH_MARKERS_RE = re.compile(
+    r"\b(?:kya|hai|hain|kise|kaun|kab|kyon|kyun|kaise|kisko|kiska|hoga|hoti|hota|kehte)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_devanagari(text: str) -> bool:
+    """Return True if text contains any Devanagari characters."""
+    return any("\u0900" <= ch <= "\u097f" for ch in text)
+
+
+def _has_latin(text: str) -> bool:
+    """Return True if text contains any Latin/English letters."""
+    return any(("A" <= ch <= "Z" or "a" <= ch <= "z") for ch in text)
+
+
+def _is_inside_quotes(text: str, pos: int) -> bool:
+    """Return True if character at pos is enclosed in unclosed quotes."""
+    before = text[:pos]
+    if before.count('"') % 2 != 0:
+        return True
+    if before.count("'") % 2 != 0:
+        return True
+    if before.count("“") > before.count("”"):
+        return True
+    if before.count("‘") > before.count("’"):
+        return True
+    return False
+
+
 # Allowed Telegram HTML formatting tags
 ALLOWED_TELEGRAM_TAGS = {
     "b", "strong", "i", "em", "u", "ins", "s", "strike", "del", "code", "pre", "tg-spoiler", "a"
@@ -25,9 +56,8 @@ def format_bilingual_question_text(text: str) -> str:
     """
     Format bilingual questions so that the second language (e.g. Hindi)
     starts on a new line instead of continuing on the same line as English.
-    The question mark '?' acts as the differentiator between English and
-    Hindi question. When '?' occurs, all upcoming words are treated as the
-    Hindi question and moved to the next line.
+    Splits at question marks only when evidence of an English-Hindi,
+    Hindi-English, or English-Hinglish question pair exists.
     """
     if not text:
         return text
@@ -41,32 +71,72 @@ def format_bilingual_question_text(text: str) -> str:
         if not cleaned_line:
             continue
 
-        # Check if '?' acts as differentiator with upcoming words on the same line
         matched_q = False
         curr = cleaned_line
+
         while True:
             q_match = re.search(r"\?+", curr)
-            if q_match:
-                start_pos, end_pos = q_match.span()
-                upcoming_words = curr[end_pos:].strip()
-                if upcoming_words:
-                    matched_q = True
-                    part = curr[:start_pos].rstrip() + curr[start_pos:end_pos]
-                    formatted_lines.append(part)
-                    curr = upcoming_words
-                    continue
-            break
+            if not q_match:
+                break
+
+            start_pos, end_pos = q_match.span()
+            if _is_inside_quotes(curr, start_pos):
+                break
+
+            upcoming_words = curr[end_pos:].strip()
+            # If closing quote immediately follows ?, check if it finishes quoted speech
+            if upcoming_words.startswith(('"', "'", "”", "’")):
+                quote_char = upcoming_words[0]
+                if (
+                    curr[:start_pos].count(quote_char) % 2 != 0
+                    or curr[:start_pos].count('"') % 2 != 0
+                    or curr[:start_pos].count("“") > 0
+                ):
+                    break
+
+            if not upcoming_words:
+                break
+
+            left_part = curr[:start_pos].rstrip()
+            right_part = upcoming_words
+
+            # Determine whether this is a legitimate bilingual split:
+            # 1. English left, Devanagari right (e.g. 'What is X? X क्या है?')
+            is_eng_to_hindi = _has_latin(left_part) and _has_devanagari(right_part)
+            # 2. Devanagari left, English right (e.g. 'X क्या है? What is X?')
+            is_hindi_to_eng = _has_devanagari(left_part) and _has_latin(right_part)
+            # 3. English left, Hinglish right (e.g. 'What is photosynthesis? prakash sanshleshan kya hai?')
+            is_eng_to_hinglish = (
+                _has_latin(left_part)
+                and not _has_devanagari(left_part)
+                and not _has_devanagari(right_part)
+                and bool(HINGLISH_MARKERS_RE.search(right_part))
+            )
+
+            if is_eng_to_hindi or is_hindi_to_eng or is_eng_to_hinglish:
+                matched_q = True
+                part = left_part + curr[start_pos:end_pos]
+                formatted_lines.append(part)
+                curr = upcoming_words
+                continue
+            else:
+                break
 
         if matched_q:
             formatted_lines.append(curr)
             continue
 
         # Fallback 1: English -> Hindi transition on same line without '?'
-        if ENG_TO_HINDI_RE.search(cleaned_line):
+        # Only split if the text preceding the punctuation does not already contain Devanagari
+        m_eng_hi = ENG_TO_HINDI_RE.search(cleaned_line)
+        m_hi_eng = HINDI_TO_ENG_RE.search(cleaned_line)
+
+        if m_eng_hi and not _has_devanagari(cleaned_line[: m_eng_hi.start()]):
             cleaned_line = ENG_TO_HINDI_RE.sub(r"\1\n\2", cleaned_line, count=1)
             formatted_lines.extend([l.strip() for l in cleaned_line.split("\n") if l.strip()])
         # Fallback 2: Hindi -> English transition on same line without '?'
-        elif HINDI_TO_ENG_RE.search(cleaned_line):
+        # Only split if the text preceding the punctuation does not already contain Latin letters (e.g. quoted Hindi in English)
+        elif m_hi_eng and not _has_latin(cleaned_line[: m_hi_eng.start()]):
             cleaned_line = HINDI_TO_ENG_RE.sub(r"\1\n\2", cleaned_line, count=1)
             formatted_lines.extend([l.strip() for l in cleaned_line.split("\n") if l.strip()])
         else:

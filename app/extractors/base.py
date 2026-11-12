@@ -118,6 +118,15 @@ class BaseExtractor(ABC):
         """Convenience alias for extract_from_bytes."""
         return self.extract_from_bytes(content, filename)
 
+    async def extract_async(self, content: bytes, filename: str) -> ExtractionResult:
+        """Asynchronously extract questions from raw file bytes outside the event loop."""
+        import asyncio
+        return await asyncio.to_thread(self.extract_from_bytes, content, filename)
+
+    async def extract_from_bytes_async(self, content: bytes, filename: str) -> ExtractionResult:
+        """Alias for extract_async."""
+        return await self.extract_async(content, filename)
+
     @abstractmethod
     def extract_from_bytes(self, content: bytes, filename: str) -> ExtractionResult:
         """Extract questions from raw file bytes."""

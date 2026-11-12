@@ -86,5 +86,78 @@ def test_legacy_shifted_font_repaired():
     assert "मनाया" in cleaned
     assert "अधिनियम" in cleaned
     assert "किया" in cleaned
+    assert "ग गया" not in cleaned
     assert "गया" in cleaned
     assert "था" in cleaned
+
+
+def test_iss_5406_legitimate_hindi_words_preserved():
+    """Verify ISS-5406: Legitimate Hindi words are not corrupted by substring replacements."""
+    legit_words = [
+        "कबहू",  # Famous poetic/Kabir word, should never become बिहू
+        "कथा",
+        "ककसन",
+        "संकलए",
+        "स्वर्गीय",
+        "दुर्गा",
+        "अमृता",
+        "हुकमनामा",
+        "सौदागर",
+        "अभिमान",
+        "इतिहास",
+        "कविता",
+        "आदिवासी",
+        "विकास",
+        "शक्ति",
+        "स्थिति",
+        "प्रशिक्षण",
+        "कर्तव्य",
+        "शर्मीला",
+        "कुर्सी",
+        "गर्मी",
+        "सर्दी",
+        "वर्दी",
+    ]
+    for word in legit_words:
+        cleaned = clean_devanagari_text(word)
+        assert cleaned == word, f"Legitimate word {word} was incorrectly modified to {cleaned}"
+
+    sentence = "कबहूं न रुखा खाई और कथा सुनकर इतिहास में आदिवासी संस्कृति का विकास हुआ।"
+    assert clean_devanagari_text(sentence) == sentence
+
+
+def test_iss_5406_mixed_language_and_technical_terms():
+    """Verify ISS-5406: Mixed Hindi-English sentences retain English terms, symbols, and formatting."""
+    mixed_text = "MPI का पूरा नाम Mean Point of Impact है और HTTP प्रोटोकॉल पोर्ट 80/443 पर काम करता है।"
+    cleaned = clean_devanagari_text(mixed_text)
+    assert "Mean Point of Impact" in cleaned
+    assert "HTTP" in cleaned
+    assert "80/443" in cleaned
+    assert "प्रोटोकॉल" in cleaned
+    assert "काम करता है।" in cleaned
+
+
+def test_iss_5406_unicode_preservation():
+    """Verify ISS-5406: Devanagari matras, conjuncts, nuktas, and danda punctuation remain intact."""
+    unicode_text = "ऋषि, क्षत्रिय, ज्ञान, श्रद्धा, फ़र्क, ज़मीन, ख़ुशी, ग़ज़ल, पेड़, चढ़ाई। ॥ॐ॥"
+    cleaned = clean_devanagari_text(unicode_text)
+    assert cleaned == unicode_text
+    # Individual nukta consonants check
+    for token in ["फ़र्क", "ज़मीन", "ख़ुशी", "ग़ज़ल", "पेड़", "चढ़ाई"]:
+        assert token in cleaned
+
+
+def test_iss_5406_cleaner_idempotency():
+    """Verify ISS-5406: clean_devanagari_text is strictly idempotent: clean(clean(t)) == clean(t)."""
+    samples = [
+        "Q1. ककतना वजन है और स्थिकत क्या है? कबंदु और कनशाना क्या है?",
+        "ववश्व पर्ािवरण फिवस प्रत्र्ेक वर्ि फकस वतवि को मनार्ा जाता है?",
+        "Mean Point of Infantry (मीन पॉइंट ऑफ इन्फ ैं ट र ी)",
+        "ऋषि, क्षत्रिय, ज्ञान, श्रद्धा, फ़र्क, ज़मीन, ख़ुशी, ग़ज़ल, पेड़, चढ़ाई।",
+        "What is photosynthesis? प्रकाश संश्लेषण क्या है?",
+    ]
+    for sample in samples:
+        first_clean = clean_devanagari_text(sample)
+        second_clean = clean_devanagari_text(first_clean)
+        assert second_clean == first_clean, f"Idempotency failed for: {sample}"
+
