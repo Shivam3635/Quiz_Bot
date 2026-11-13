@@ -41,44 +41,48 @@ def save_quiz_batch(
     description: Optional[str] = None,
 ) -> QuizSet:
     """Persist a parsed quiz batch with settings into the database."""
-    quiz_set = QuizSet(user_id=user_id, title=title, description=description, status="ready")
-    db.add(quiz_set)
-    db.flush()
-
-    # Save Settings
-    settings_rec = QuizSettingsRecord(
-        quiz_set_id=quiz_set.id,
-        is_anonymous=settings.is_anonymous,
-        shuffle_options=settings.shuffle_options,
-        explanation_enabled=settings.explanation_enabled,
-        time_limit=settings.time_limit,
-        channel_id=settings.channel_id,
-    )
-    db.add(settings_rec)
-
-    # Save Questions and Options
-    for pos, q in enumerate(questions):
-        q_rec = Question(
-            quiz_set_id=quiz_set.id,
-            question=q.question,
-            correct_option=q.correct_option,
-            explanation=q.explanation,
-            position=pos,
-        )
-        db.add(q_rec)
+    try:
+        quiz_set = QuizSet(user_id=user_id, title=title, description=description, status="ready")
+        db.add(quiz_set)
         db.flush()
 
-        for opt_pos, opt_text in enumerate(q.options):
-            opt_rec = Option(
-                question_id=q_rec.id,
-                option_text=opt_text,
-                position=opt_pos,
-            )
-            db.add(opt_rec)
+        # Save Settings
+        settings_rec = QuizSettingsRecord(
+            quiz_set_id=quiz_set.id,
+            is_anonymous=settings.is_anonymous,
+            shuffle_options=settings.shuffle_options,
+            explanation_enabled=settings.explanation_enabled,
+            time_limit=settings.time_limit,
+            channel_id=settings.channel_id,
+        )
+        db.add(settings_rec)
 
-    db.commit()
-    db.refresh(quiz_set)
-    return quiz_set
+        # Save Questions and Options
+        for pos, q in enumerate(questions):
+            q_rec = Question(
+                quiz_set_id=quiz_set.id,
+                question=q.question,
+                correct_option=q.correct_option,
+                explanation=q.explanation,
+                position=pos,
+            )
+            db.add(q_rec)
+            db.flush()
+
+            for opt_pos, opt_text in enumerate(q.options):
+                opt_rec = Option(
+                    question_id=q_rec.id,
+                    option_text=opt_text,
+                    position=opt_pos,
+                )
+                db.add(opt_rec)
+
+        db.commit()
+        db.refresh(quiz_set)
+        return quiz_set
+    except Exception:
+        db.rollback()
+        raise
 
 
 def create_publish_job(db: Session, quiz_set_id: int, total: int) -> PublishJob:
@@ -222,40 +226,44 @@ def update_quiz_set_questions(
     db: Session, quiz_set_id: int, questions: list[QuizQuestion]
 ) -> None:
     """Synchronize updated questions for an existing quiz set in the database."""
-    quiz_set = (
-        db.query(QuizSet)
-        .options(selectinload(QuizSet.questions).selectinload(Question.options))
-        .filter(QuizSet.id == quiz_set_id)
-        .first()
-    )
-    if not quiz_set:
-        return
-
-    # Delete existing questions (cascade deletes options)
-    for q in list(quiz_set.questions):
-        db.delete(q)
-    db.flush()
-
-    for pos, q in enumerate(questions):
-        q_rec = Question(
-            quiz_set_id=quiz_set.id,
-            question=q.question,
-            correct_option=q.correct_option,
-            explanation=q.explanation,
-            position=pos,
+    try:
+        quiz_set = (
+            db.query(QuizSet)
+            .options(selectinload(QuizSet.questions).selectinload(Question.options))
+            .filter(QuizSet.id == quiz_set_id)
+            .first()
         )
-        db.add(q_rec)
+        if not quiz_set:
+            return
+
+        # Delete existing questions (cascade deletes options)
+        for q in list(quiz_set.questions):
+            db.delete(q)
         db.flush()
 
-        for opt_pos, opt_text in enumerate(q.options):
-            opt_rec = Option(
-                question_id=q_rec.id,
-                option_text=opt_text,
-                position=opt_pos,
+        for pos, q in enumerate(questions):
+            q_rec = Question(
+                quiz_set_id=quiz_set.id,
+                question=q.question,
+                correct_option=q.correct_option,
+                explanation=q.explanation,
+                position=pos,
             )
-            db.add(opt_rec)
+            db.add(q_rec)
+            db.flush()
 
-    db.commit()
+            for opt_pos, opt_text in enumerate(q.options):
+                opt_rec = Option(
+                    question_id=q_rec.id,
+                    option_text=opt_text,
+                    position=opt_pos,
+                )
+                db.add(opt_rec)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def update_quiz_set_timer(db: Session, quiz_set_id: int, time_limit: Optional[int]) -> None:
@@ -354,8 +362,3 @@ def deactivate_group_member(db: Session, chat_id: int, user_id: int) -> None:
     if member:
         member.is_active = False
         db.commit()
-
-
-
-
-

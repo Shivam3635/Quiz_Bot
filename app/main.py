@@ -1,8 +1,11 @@
+import asyncio
+import json
 import os
 import sys
 import threading
 import warnings
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from telegram.warnings import PTBUserWarning
 
 warnings.filterwarnings("ignore", category=PTBUserWarning)
@@ -18,21 +21,24 @@ from telegram.ext import (
     ConversationHandler,
     MessageHandler,
     PollAnswerHandler,
+    TypeHandler,
     filters,
 )
 
 from app.bot.handlers import (
+    back_to_failed_summary_callback,
     cancel_game_callback,
     cancel_quiz_creation,
     coming_soon_callback,
-    confirm_del_saved_question_callback,
-    confirm_delete_question_callback,
-    confirm_delete_quiz_callback,
-    confirm_publish_callback,
     config_desc_callback,
     config_dest_callback,
     config_title_callback,
     config_toggle_callback,
+    confirm_del_saved_question_callback,
+    confirm_delete_question_callback,
+    confirm_delete_quiz_callback,
+    confirm_publish_callback,
+    confirm_retry_uncertain_callback,
     continue_session_callback,
     creation_timer_callback,
     cycle_timer_callback,
@@ -82,7 +88,9 @@ from app.bot.handlers import (
     replay_game_callback,
     republish_change_dest_callback,
     republish_confirm_callback,
+    retry_confirmed_callback,
     retry_failed_callback,
+    retry_with_uncertain_prompt_callback,
     set_correct_answer_callback,
     settings_callback,
     show_copyable_question_callback,
@@ -104,12 +112,58 @@ from app.bot.handlers import (
     track_group_member_message,
     view_quiz_callback,
 )
+from app.bot.middleware import staging_security_gatekeeper
+from app.bot.monitored_request import MonitoredHTTPXRequest
+from app.bot.polling_tracker import reset_polling_tracker
 from app.bot.states import QuizCreationState
 from app.config.settings import get_settings
-from app.database.database import init_db
+from app.database.database import DatabaseIdentityError, init_db
+from app.readiness import (
+    get_application_readiness,
+    is_application_ready,
+    reset_application_readiness,
+    set_application_lifecycle_ready,
+    set_application_ready,
+)
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+__all__ = [
+    "HealthCheckHandler",
+    "create_bot_app",
+    "get_application_readiness",
+    "is_application_ready",
+    "main",
+    "post_init",
+    "post_shutdown",
+    "post_stop",
+    "reset_application_readiness",
+    "set_application_lifecycle_ready",
+    "set_application_ready",
+    "start_health_check_server",
+]
+
+
+async def _wait_for_application_running(app: Application) -> None:
+    """Background task to transition application readiness to True once polling is active."""
+    try:
+        # Check every 50ms for up to 30 seconds
+        for _ in range(600):
+            if getattr(app, "running", False):
+                updater = getattr(app, "updater", None)
+                if updater is None or getattr(updater, "running", False):
+                    set_application_lifecycle_ready(True)
+                    logger.info("Application readiness marked TRUE (polling active).")
+                    return
+            await asyncio.sleep(0.05)
+        logger.error("Application failed to enter running state within startup timeout.")
+        set_application_lifecycle_ready(False, reason="startup_timeout")
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error monitoring application running state: %s", e)
+        set_application_lifecycle_ready(False, reason=str(e))
 
 
 async def post_init(application: Application) -> None:
@@ -132,12 +186,13 @@ async def post_init(application: Application) -> None:
     try:
         await application.bot.set_my_commands(commands)
         logger.info("Bot commands successfully registered with Telegram.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Failed to register bot commands with Telegram: %s", e)
 
     # Register default administrator rights for groups
     try:
         from telegram import ChatAdministratorRights
+
         default_group_rights = ChatAdministratorRights(
             is_anonymous=False,
             can_manage_chat=True,
@@ -159,28 +214,58 @@ async def post_init(application: Application) -> None:
             for_channels=False,
         )
         logger.info("Default group administrator rights registered successfully.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Failed to register default administrator rights: %s", e)
+
+    # Schedule background verification to mark readiness True once event loop & updater are running
+    asyncio.create_task(_wait_for_application_running(application))
+
+
+async def post_stop(application: Application) -> None:
+    """Lifecycle hook invoked when Application stops."""
+    set_application_lifecycle_ready(False, reason="application_stopped")
+    reset_polling_tracker()
+    logger.info("Application stopped: readiness set to FALSE.")
+
+
+async def post_shutdown(application: Application) -> None:
+    """Lifecycle hook invoked when Application completes shutdown."""
+    set_application_lifecycle_ready(False, reason="application_shutdown")
+    reset_polling_tracker()
+    logger.info("Application shut down: readiness set to FALSE.")
 
 
 def create_bot_app() -> Application:
     """Build and configure the Telegram Bot Application with complete handlers."""
     settings = get_settings()
 
-    # Ensure database tables exist
+    # Ensure database tables exist after verifying database identity
     try:
         init_db()
         logger.info("Database initialized successfully.")
+    except DatabaseIdentityError as e:
+        logger.critical("Fatal: Database identity verification failed: %s", e)
+        raise
     except Exception as e:
-        logger.warning("Database init warning: %s", e)
+        logger.critical("Fatal: Database initialization failed: %s", e)
+        raise RuntimeError(f"Startup aborted: database initialization failed: {e}") from e
 
-    # Initialize Telegram Application with post_init hook for command registration
+    # Initialize MonitoredHTTPXRequest for polling telemetry
+    get_updates_request = MonitoredHTTPXRequest()
+
+    # Initialize Telegram Application with lifecycle hooks
     application = (
         Application.builder()
         .token(settings.TELEGRAM_BOT_TOKEN)
+        .get_updates_request(get_updates_request)
         .post_init(post_init)
+        .post_stop(post_stop)
+        .post_shutdown(post_shutdown)
         .build()
     )
+
+    # Register staging perimeter security gatekeeper in group -1 (runs before all group 0 & 1 handlers)
+    application.add_handler(TypeHandler(Update, staging_security_gatekeeper), group=-1)
 
     # Bulk Quiz Creation Multi-Part Conversation Flow
     bulk_conv_handler = ConversationHandler(
@@ -208,23 +293,31 @@ def create_bot_app() -> Application:
                 CallbackQueryHandler(discard_and_restart_callback, pattern="^multipart_discard$"),
                 CallbackQueryHandler(drop_broken_question_callback, pattern="^drop_broken_q_\\d+$"),
                 CallbackQueryHandler(fix_invalid_question_callback, pattern="^fix_invalid_q_\\d+$"),
-                CallbackQueryHandler(drop_invalid_questions_callback, pattern="^drop_invalid_questions$"),
+                CallbackQueryHandler(
+                    drop_invalid_questions_callback, pattern="^drop_invalid_questions$"
+                ),
                 CallbackQueryHandler(preview_callback, pattern="^goto_preview$"),
                 MessageHandler(filters.Document.ALL | filters.PHOTO, receive_quiz_document_message),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_quiz_part_message),
             ],
             QuizCreationState.CONFIGURING_SETTINGS: [
-                CallbackQueryHandler(config_toggle_callback, pattern="^cfg_(timer|shuffle|anon|expl|banner)_.+$"),
+                CallbackQueryHandler(
+                    config_toggle_callback, pattern="^cfg_(timer|shuffle|anon|expl|banner)_.+$"
+                ),
                 CallbackQueryHandler(config_dest_callback, pattern="^cfg_dest_.+$"),
                 CallbackQueryHandler(config_title_callback, pattern="^cfg_title_.+$"),
                 CallbackQueryHandler(config_desc_callback, pattern="^cfg_desc_.+$"),
-                CallbackQueryHandler(finish_creation_settings_callback, pattern="^finish_creation_settings$"),
+                CallbackQueryHandler(
+                    finish_creation_settings_callback, pattern="^finish_creation_settings$"
+                ),
                 CallbackQueryHandler(creation_timer_callback, pattern="^creation_timer_\\d+$"),
                 CallbackQueryHandler(view_quiz_callback, pattern="^view_quiz_\\d+$"),
                 CallbackQueryHandler(start_command, pattern="^action_main_menu$"),
                 CallbackQueryHandler(prompt_set_title_callback, pattern="^prompt_set_title$"),
                 CallbackQueryHandler(prompt_set_desc_callback, pattern="^prompt_set_desc$"),
-                CallbackQueryHandler(toggle_header_banner_callback, pattern="^toggle_header_banner$"),
+                CallbackQueryHandler(
+                    toggle_header_banner_callback, pattern="^toggle_header_banner$"
+                ),
                 CallbackQueryHandler(toggle_anonymous_callback, pattern="^toggle_anonymous$"),
                 CallbackQueryHandler(toggle_shuffle_callback, pattern="^toggle_shuffle$"),
                 CallbackQueryHandler(toggle_explanation_callback, pattern="^toggle_explanation$"),
@@ -240,12 +333,22 @@ def create_bot_app() -> Application:
                 CallbackQueryHandler(preview_noop_callback, pattern="^preview_noop$"),
                 CallbackQueryHandler(jump_next_invalid_callback, pattern="^jump_next_invalid$"),
                 CallbackQueryHandler(fix_invalid_question_callback, pattern="^fix_invalid_q_\\d+$"),
-                CallbackQueryHandler(drop_invalid_questions_callback, pattern="^drop_invalid_questions$"),
+                CallbackQueryHandler(
+                    drop_invalid_questions_callback, pattern="^drop_invalid_questions$"
+                ),
                 CallbackQueryHandler(continue_session_callback, pattern="^multipart_continue$"),
-                CallbackQueryHandler(edit_current_question_callback, pattern="^edit_current_question$"),
-                CallbackQueryHandler(edit_saved_question_callback, pattern="^edit_saved_q_\\d+_\\d+$"),
-                CallbackQueryHandler(delete_question_prompt_callback, pattern="^delete_current_question$"),
-                CallbackQueryHandler(confirm_delete_question_callback, pattern="^confirm_delete_\\d+$"),
+                CallbackQueryHandler(
+                    edit_current_question_callback, pattern="^edit_current_question$"
+                ),
+                CallbackQueryHandler(
+                    edit_saved_question_callback, pattern="^edit_saved_q_\\d+_\\d+$"
+                ),
+                CallbackQueryHandler(
+                    delete_question_prompt_callback, pattern="^delete_current_question$"
+                ),
+                CallbackQueryHandler(
+                    confirm_delete_question_callback, pattern="^confirm_delete_\\d+$"
+                ),
                 CallbackQueryHandler(settings_callback, pattern="^goto_settings$"),
                 CallbackQueryHandler(confirm_publish_callback, pattern="^goto_confirm_publish$"),
                 CallbackQueryHandler(view_quiz_callback, pattern="^view_quiz_\\d+$"),
@@ -256,7 +359,9 @@ def create_bot_app() -> Application:
                 CallbackQueryHandler(prompt_edit_option_callback, pattern="^edit_opt_\\d+$"),
                 CallbackQueryHandler(prompt_edit_explanation_callback, pattern="^edit_q_expl$"),
                 CallbackQueryHandler(show_copyable_question_callback, pattern="^show_copyable_q$"),
-                CallbackQueryHandler(edit_current_question_callback, pattern="^edit_current_question$"),
+                CallbackQueryHandler(
+                    edit_current_question_callback, pattern="^edit_current_question$"
+                ),
                 CallbackQueryHandler(preview_callback, pattern="^goto_preview$"),
                 CallbackQueryHandler(view_quiz_callback, pattern="^view_quiz_\\d+$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_question_edit_message),
@@ -264,6 +369,16 @@ def create_bot_app() -> Application:
             QuizCreationState.CONFIRMING_PUBLISH: [
                 CallbackQueryHandler(start_publishing_callback, pattern="^confirm_publish_now$"),
                 CallbackQueryHandler(retry_failed_callback, pattern="^retry_failed_quizzes$"),
+                CallbackQueryHandler(retry_confirmed_callback, pattern="^retry_confirmed_quizzes$"),
+                CallbackQueryHandler(
+                    retry_with_uncertain_prompt_callback, pattern="^retry_with_uncertain_prompt$"
+                ),
+                CallbackQueryHandler(
+                    confirm_retry_uncertain_callback, pattern="^confirm_retry_uncertain$"
+                ),
+                CallbackQueryHandler(
+                    back_to_failed_summary_callback, pattern="^back_to_failed_summary$"
+                ),
                 CallbackQueryHandler(preview_callback, pattern="^goto_preview$"),
                 CallbackQueryHandler(settings_callback, pattern="^goto_settings$"),
             ],
@@ -291,57 +406,127 @@ def create_bot_app() -> Application:
     application.add_handler(CommandHandler("startquiz", startquiz_command))
     application.add_handler(CommandHandler("stopquiz", stopquiz_command))
     application.add_handler(CommandHandler(["all", "tagall", "mentionall"], mention_all_command))
-    application.add_handler(CommandHandler(["stopall", "cancelall", "stopmention"], stop_mention_command))
+    application.add_handler(
+        CommandHandler(["stopall", "cancelall", "stopmention"], stop_mention_command)
+    )
     application.add_handler(CommandHandler("admin", mention_admin_command))
 
     # @MentionBot-style text triggers (@all, #all, @admin, #admin) in groups
-    application.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Regex(r"^(?:@all|#all)(?:\s.*)?$"), mention_all_command))
-    application.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Regex(r"^(?:@admin|#admin)(?:\s.*)?$"), mention_admin_command))
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & filters.Regex(r"^(?:@all|#all)(?:\s.*)?$"),
+            mention_all_command,
+        )
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & filters.Regex(r"^(?:@admin|#admin)(?:\s.*)?$"),
+            mention_admin_command,
+        )
+    )
 
     # Track active group members for @MentionBot tag-all roster
-    application.add_handler(ChatMemberHandler(handle_chat_member_updated, ChatMemberHandler.CHAT_MEMBER))
-    application.add_handler(ChatMemberHandler(handle_my_chat_member_updated, ChatMemberHandler.MY_CHAT_MEMBER))
-    application.add_handler(MessageHandler(filters.ChatType.GROUPS, track_group_member_message), group=1)
+    application.add_handler(
+        ChatMemberHandler(handle_chat_member_updated, ChatMemberHandler.CHAT_MEMBER)
+    )
+    application.add_handler(
+        ChatMemberHandler(handle_my_chat_member_updated, ChatMemberHandler.MY_CHAT_MEMBER)
+    )
+    application.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, track_group_member_message), group=1
+    )
     application.add_handler(CallbackQueryHandler(tag_me_callback, pattern="^mention_tag_me$"))
     application.add_handler(CallbackQueryHandler(mention_stop_callback, pattern="^mention_stop$"))
 
     # Guide and Template download callbacks
     application.add_handler(CallbackQueryHandler(guide_command, pattern="^action_download_guide$"))
-    application.add_handler(CallbackQueryHandler(template_command, pattern="^action_download_template$"))
+    application.add_handler(
+        CallbackQueryHandler(template_command, pattern="^action_download_template$")
+    )
 
     # Live Group Quiz Battle callbacks
     application.add_handler(CallbackQueryHandler(join_game_callback, pattern="^game_join_\\d+$"))
     application.add_handler(CallbackQueryHandler(start_game_callback, pattern="^game_start_\\d+$"))
-    application.add_handler(CallbackQueryHandler(cancel_game_callback, pattern="^game_cancel_\\d+$"))
-    application.add_handler(CallbackQueryHandler(launch_selected_quiz_callback, pattern="^game_launch_\\d+$"))
-    application.add_handler(CallbackQueryHandler(cancel_game_callback, pattern="^game_cancel_selection$"))
-    application.add_handler(CallbackQueryHandler(replay_game_callback, pattern="^game_replay_\\d+$"))
+    application.add_handler(
+        CallbackQueryHandler(cancel_game_callback, pattern="^game_cancel_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(launch_selected_quiz_callback, pattern="^game_launch_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(cancel_game_callback, pattern="^game_cancel_selection$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(replay_game_callback, pattern="^game_replay_\\d+$")
+    )
 
     # Real-time poll answer tracking for live leaderboards
     application.add_handler(PollAnswerHandler(handle_poll_answer))
 
     # /myquizzes and saved quiz set callbacks
     application.add_handler(CallbackQueryHandler(my_quizzes_command, pattern="^action_saved_sets$"))
-    application.add_handler(CallbackQueryHandler(my_quizzes_page_callback, pattern="^my_quizzes_list_\\d+$"))
-    application.add_handler(CallbackQueryHandler(myquizzes_noop_callback, pattern="^myquizzes_noop$"))
+    application.add_handler(
+        CallbackQueryHandler(my_quizzes_page_callback, pattern="^my_quizzes_list_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(myquizzes_noop_callback, pattern="^myquizzes_noop$")
+    )
     application.add_handler(CallbackQueryHandler(view_quiz_callback, pattern="^view_quiz_\\d+$"))
-    application.add_handler(CallbackQueryHandler(preview_saved_quiz_callback, pattern="^preview_saved_\\d+_\\d+$"))
-    application.add_handler(CallbackQueryHandler(republish_confirm_callback, pattern="^republish_confirm_\\d+$"))
-    application.add_handler(CallbackQueryHandler(republish_change_dest_callback, pattern="^republish_change_dest_\\d+$"))
-    application.add_handler(CallbackQueryHandler(execute_republish_callback, pattern="^execute_republish_\\d+$"))
-    application.add_handler(CallbackQueryHandler(delete_saved_quiz_prompt_callback, pattern="^delete_saved_prompt_\\d+$"))
-    application.add_handler(CallbackQueryHandler(confirm_delete_quiz_callback, pattern="^confirm_delete_quiz_\\d+$"))
-    application.add_handler(CallbackQueryHandler(delete_saved_question_prompt_callback, pattern="^del_saved_q_\\d+_\\d+$"))
-    application.add_handler(CallbackQueryHandler(confirm_del_saved_question_callback, pattern="^confirm_del_saved_q_\\d+_\\d+$"))
-    application.add_handler(CallbackQueryHandler(edit_saved_question_callback, pattern="^edit_saved_q_\\d+_\\d+$"))
-    application.add_handler(CallbackQueryHandler(creation_timer_callback, pattern="^creation_timer_\\d+$"))
-    application.add_handler(CallbackQueryHandler(edit_quiz_settings_callback, pattern="^edit_quiz_settings_\\d+$"))
-    application.add_handler(CallbackQueryHandler(config_toggle_callback, pattern="^cfg_(timer|shuffle|anon|expl|banner)_.+$"))
+    application.add_handler(
+        CallbackQueryHandler(preview_saved_quiz_callback, pattern="^preview_saved_\\d+_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(republish_confirm_callback, pattern="^republish_confirm_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(republish_change_dest_callback, pattern="^republish_change_dest_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(execute_republish_callback, pattern="^execute_republish_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            delete_saved_quiz_prompt_callback, pattern="^delete_saved_prompt_\\d+$"
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(confirm_delete_quiz_callback, pattern="^confirm_delete_quiz_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            delete_saved_question_prompt_callback, pattern="^del_saved_q_\\d+_\\d+$"
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            confirm_del_saved_question_callback, pattern="^confirm_del_saved_q_\\d+_\\d+$"
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(edit_saved_question_callback, pattern="^edit_saved_q_\\d+_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(creation_timer_callback, pattern="^creation_timer_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(edit_quiz_settings_callback, pattern="^edit_quiz_settings_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            config_toggle_callback, pattern="^cfg_(timer|shuffle|anon|expl|banner)_.+$"
+        )
+    )
     application.add_handler(CallbackQueryHandler(config_dest_callback, pattern="^cfg_dest_.+$"))
     application.add_handler(CallbackQueryHandler(config_title_callback, pattern="^cfg_title_.+$"))
     application.add_handler(CallbackQueryHandler(config_desc_callback, pattern="^cfg_desc_.+$"))
-    application.add_handler(CallbackQueryHandler(finish_creation_settings_callback, pattern="^finish_creation_settings$"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_republish_dest_message))
+    application.add_handler(
+        CallbackQueryHandler(
+            finish_creation_settings_callback, pattern="^finish_creation_settings$"
+        )
+    )
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, receive_republish_dest_message)
+    )
 
     # General callback queries
     application.add_handler(CallbackQueryHandler(start_command, pattern="^action_main_menu$"))
@@ -355,10 +540,15 @@ def create_bot_app() -> Application:
 
     async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log errors caused by updates and ignore harmless 'Message is not modified' errors."""
-        if isinstance(context.error, BadRequest) and "message is not modified" in str(context.error).lower():
+        if (
+            isinstance(context.error, BadRequest)
+            and "message is not modified" in str(context.error).lower()
+        ):
             logger.debug("Ignored harmless Telegram 'Message is not modified' error.")
             return
-        logger.error("Exception while handling an update: %s", context.error, exc_info=context.error)
+        logger.error(
+            "Exception while handling an update: %s", context.error, exc_info=context.error
+        )
 
     application.add_error_handler(global_error_handler)
 
@@ -366,17 +556,137 @@ def create_bot_app() -> Application:
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Minimal HTTP handler to satisfy Render/cloud health checks."""
+    """HTTP handler to satisfy Render/cloud health, liveness, and readiness checks."""
+
+    def _get_common_metadata(self) -> tuple[str, str]:
+        try:
+            env_name = get_settings().ENVIRONMENT
+        except Exception:  # noqa: BLE001
+            env_name = os.environ.get("ENVIRONMENT", "unknown")
+        commit_sha = os.environ.get("RENDER_GIT_COMMIT", "local-dev")
+        return env_name, commit_sha
+
+    def _send_json_response(self, status_code: int, payload: dict) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self) -> None:
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b"OK - QuizBotPro is active and healthy")
+        clean_path = self.path.split("?")[0].rstrip("/")
+        env_name, commit_sha = self._get_common_metadata()
+        readiness_info = get_application_readiness()
+        is_ready = readiness_info["ready"]
+
+        if clean_path == "/live":
+            # Liveness probe: process and HTTP server are alive
+            self._send_json_response(
+                200,
+                {
+                    "status": "alive",
+                    "commit": commit_sha,
+                    "environment": env_name,
+                },
+            )
+        elif clean_path == "/ready":
+            # Readiness probe: application fully initialized and polling
+            if is_ready:
+                self._send_json_response(
+                    200,
+                    {
+                        "status": "ready",
+                        "ready": True,
+                        "commit": commit_sha,
+                        "environment": env_name,
+                        "polling": readiness_info.get("polling"),
+                    },
+                )
+            else:
+                self._send_json_response(
+                    503,
+                    {
+                        "status": "not_ready",
+                        "ready": False,
+                        "reason": readiness_info.get("reason") or "initializing",
+                        "commit": commit_sha,
+                        "environment": env_name,
+                        "polling": readiness_info.get("polling"),
+                    },
+                )
+            return
+        elif clean_path in ("/health", "/status"):
+            # Compatibility endpoints: reflect overall health based on readiness
+            if is_ready:
+                self._send_json_response(
+                    200,
+                    {
+                        "status": "healthy",
+                        "ready": True,
+                        "commit": commit_sha,
+                        "environment": env_name,
+                        "polling": readiness_info.get("polling"),
+                    },
+                )
+            else:
+                self._send_json_response(
+                    503,
+                    {
+                        "status": "unhealthy",
+                        "ready": False,
+                        "reason": readiness_info.get("reason") or "initializing",
+                        "commit": commit_sha,
+                        "environment": env_name,
+                        "polling": readiness_info.get("polling"),
+                    },
+                )
+        elif clean_path == "/version":
+            # Version endpoint: returns commit, environment, and readiness status
+            self._send_json_response(
+                200,
+                {
+                    "status": "ready" if is_ready else "not_ready",
+                    "ready": is_ready,
+                    "commit": commit_sha,
+                    "environment": env_name,
+                },
+            )
+        elif clean_path == "":
+            # Root path '/' backward-compatible response for existing Render health check
+            body = b"OK - QuizBotPro is active and healthy"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            body = b"Not Found"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     def do_HEAD(self) -> None:
-        self.send_response(200)
-        self.end_headers()
+        clean_path = self.path.split("?")[0].rstrip("/")
+        readiness_info = get_application_readiness()
+        is_ready = readiness_info["ready"]
+
+        if clean_path in ("", "/live", "/version"):
+            self.send_response(200)
+            if clean_path == "":
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+            else:
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+        elif clean_path in ("/ready", "/health", "/status"):
+            self.send_response(200 if is_ready else 503)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
         # Suppress routine health check request logs to keep terminal logs clean
@@ -389,7 +699,7 @@ def start_health_check_server(port: int) -> None:
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
         logger.info("Health-check server running on port %d for cloud hosting.", port)
         server.serve_forever()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Could not bind health-check server on port %d: %s", port, e)
 
 
@@ -404,19 +714,30 @@ def main() -> None:
         t = threading.Thread(target=start_health_check_server, args=(int(port_env),), daemon=True)
         t.start()
 
-    if (
-        not settings.TELEGRAM_BOT_TOKEN
-        or settings.TELEGRAM_BOT_TOKEN in ("your_bot_token_here", "mock_token_for_tests")
+    if not settings.TELEGRAM_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN in (
+        "your_bot_token_here",
+        "mock_token_for_tests",
     ):
         logger.error(
             "CRITICAL: Valid TELEGRAM_BOT_TOKEN is required to start live polling. "
             "Please configure TELEGRAM_BOT_TOKEN in .env or environment variables."
         )
+        set_application_ready(False, reason="invalid_or_missing_telegram_token")
+        reset_polling_tracker()
         sys.exit(1)
 
-    app = create_bot_app()
-    logger.info("All QuizBotPro bot handlers successfully registered. Starting polling...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        app = create_bot_app()
+        logger.info("All QuizBotPro bot handlers successfully registered. Starting polling...")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        logger.critical("Fatal error encountered during bot execution: %s", e)
+        set_application_ready(False, reason=f"fatal_error: {e}")
+        reset_polling_tracker()
+        raise
+    finally:
+        set_application_ready(False, reason="process_terminating")
+        reset_polling_tracker()
 
 
 if __name__ == "__main__":

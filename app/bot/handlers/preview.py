@@ -18,6 +18,7 @@ from app.parser.validator import (
     TELEGRAM_MAX_EXTENDED_OPTION_LENGTH,
     TELEGRAM_MAX_OPTION_LENGTH,
     TELEGRAM_MAX_QUESTION_LENGTH,
+    telegram_utf16_length,
 )
 from app.database.database import SessionLocal
 from app.database.repositories import (
@@ -46,14 +47,14 @@ def format_question_preview(q: QuizQuestion, index: int, total: int, settings: Q
         for err in val_errors:
             lines.append(f"• <i>{err.message}</i>")
         lines.append("")
-    elif any(len(opt.strip()) > 100 for opt in q.options):
+    elif any(telegram_utf16_length(opt.strip()) > 100 for opt in q.options):
         lines.append("💡 <i>Extended Format: Full question & options will be posted with Option A/B/C/D buttons below.</i>\n")
 
     lines.append(f"❓ <b>{q.display_question}</b>\n")
 
     for opt_idx, opt_text in enumerate(q.options):
         letter = chr(ord("A") + opt_idx)
-        opt_len = len(opt_text.strip())
+        opt_len = telegram_utf16_length(opt_text.strip())
         len_tag = f" ℹ️ <i>({opt_len} chars - Extended)</i>" if opt_len > 100 else ""
         if opt_idx == q.correct_option:
             lines.append(f"<b>[{letter}] {opt_text}</b>  ✅ <i>(Correct Answer)</i>{len_tag}")
@@ -157,7 +158,7 @@ async def edit_current_question_callback(update: Update, context: ContextTypes.D
 
     options_summary = "\n".join(
         [
-            f"[{chr(ord('A') + i)}] {opt} {'✅' if i == q.correct_option else ''}{' ℹ️ (' + str(len(opt.strip())) + ' chars - Extended)' if len(opt.strip()) > 100 else ''}"
+            f"[{chr(ord('A') + i)}] {opt} {'✅' if i == q.correct_option else ''}{' ℹ️ (' + str(telegram_utf16_length(opt.strip())) + ' chars - Extended)' if telegram_utf16_length(opt.strip()) > 100 else ''}"
             for i, opt in enumerate(q.options)
         ]
     )
@@ -434,9 +435,10 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
 
     # Case 1: Editing Question text
     if edit_mode == "question_text":
-        if len(text) > TELEGRAM_MAX_QUESTION_LENGTH:
+        q_len = telegram_utf16_length(text)
+        if q_len > TELEGRAM_MAX_QUESTION_LENGTH:
             await update.message.reply_text(
-                f"⚠️ Question text is too long ({len(text)} chars). Limit is {TELEGRAM_MAX_QUESTION_LENGTH} characters. Please send a shorter text:"
+                f"⚠️ Question text is too long ({q_len} chars). Limit is {TELEGRAM_MAX_QUESTION_LENGTH} characters. Please send a shorter text:"
             )
             return QuizCreationState.EDITING_QUESTION
 
@@ -470,9 +472,10 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
         except ValueError:
             return await preview_callback(update, context)
 
-        if len(text) > TELEGRAM_MAX_EXTENDED_OPTION_LENGTH:
+        opt_len = telegram_utf16_length(text)
+        if opt_len > TELEGRAM_MAX_EXTENDED_OPTION_LENGTH:
             await update.message.reply_text(
-                f"⚠️ Option text is too long ({len(text)} chars). Limit is {TELEGRAM_MAX_EXTENDED_OPTION_LENGTH}. Please send a shorter text:"
+                f"⚠️ Option text is too long ({opt_len} chars). Limit is {TELEGRAM_MAX_EXTENDED_OPTION_LENGTH}. Please send a shorter text:"
             )
             return QuizCreationState.EDITING_QUESTION
 
@@ -506,9 +509,10 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
             q.explanation = None
             await update.message.reply_text("✅ <b>Explanation removed!</b>", parse_mode=ParseMode.HTML)
         else:
-            if len(text) > TELEGRAM_MAX_EXPLANATION_LENGTH:
+            expl_len = telegram_utf16_length(text)
+            if expl_len > TELEGRAM_MAX_EXPLANATION_LENGTH:
                 await update.message.reply_text(
-                    f"⚠️ Explanation is too long ({len(text)} chars). Limit is {TELEGRAM_MAX_EXPLANATION_LENGTH}. Please send a shorter explanation:"
+                    f"⚠️ Explanation is too long ({expl_len} chars). Limit is {TELEGRAM_MAX_EXPLANATION_LENGTH}. Please send a shorter explanation:"
                 )
                 return QuizCreationState.EDITING_QUESTION
             q.explanation = text

@@ -110,7 +110,7 @@ async def test_telegram_service_sends_html_parse_mode():
         settings=settings,
     )
 
-    assert result is True
+    assert result.success is True
     assert mock_bot.send_poll.call_count == 1
     call_kwargs = mock_bot.send_poll.call_args.kwargs
 
@@ -151,7 +151,7 @@ async def test_telegram_service_parse_error_fallback():
         settings=settings,
     )
 
-    assert result is True
+    assert result.success is True
     # Verify send_poll was called twice (once with HTML, then retry with plain text)
     assert mock_bot.send_poll.call_count == 2
 

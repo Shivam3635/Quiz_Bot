@@ -36,8 +36,12 @@ from app.bot.handlers.preview import (
     show_copyable_question_callback,
 )
 from app.bot.handlers.publish import (
+    back_to_failed_summary_callback,
     confirm_publish_callback,
+    confirm_retry_uncertain_callback,
+    retry_confirmed_callback,
     retry_failed_callback,
+    retry_with_uncertain_prompt_callback,
     start_publishing_callback,
 )
 from app.bot.handlers.settings import (
@@ -151,6 +155,10 @@ __all__ = [
     "confirm_publish_callback",
     "start_publishing_callback",
     "retry_failed_callback",
+    "retry_confirmed_callback",
+    "retry_with_uncertain_prompt_callback",
+    "confirm_retry_uncertain_callback",
+    "back_to_failed_summary_callback",
     "my_quizzes_command",
     "my_quizzes_page_callback",
     "myquizzes_noop_callback",

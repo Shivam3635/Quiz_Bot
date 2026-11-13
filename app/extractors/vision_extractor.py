@@ -3,6 +3,7 @@
 import io
 import os
 import re
+import time
 from typing import Optional
 from PIL import Image
 
@@ -38,6 +39,8 @@ class VisionExtractor(BaseExtractor):
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.settings = get_settings()
         self.api_key = api_key or self.settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+        self.model_name = getattr(self.settings, "GEMINI_MODEL", "gemini-3.8-flash")
+        self.timeout_seconds = getattr(self.settings, "GEMINI_TIMEOUT_SECONDS", 30.0)
         self.parser = BulkQuizParser()
 
     def is_available(self) -> bool:
@@ -46,6 +49,7 @@ class VisionExtractor(BaseExtractor):
 
     def extract_from_bytes(self, content: bytes, filename: str) -> ExtractionResult:
         """Extract quiz questions from raw image bytes (JPEG, PNG, WEBP, etc.)."""
+        start_time = time.monotonic()
         if not self.is_available():
             return ExtractionResult(
                 error_message=(
@@ -58,7 +62,6 @@ class VisionExtractor(BaseExtractor):
         try:
             # Validate image can be opened with Pillow
             img = Image.open(io.BytesIO(content))
-            img_format = img.format or "JPEG"
         except Exception as e:
             return ExtractionResult(
                 error_message=f"Failed to read image '{filename}': {str(e)}",
@@ -71,27 +74,51 @@ class VisionExtractor(BaseExtractor):
 
             client = genai.Client(api_key=self.api_key)
 
+            # Resize if dimensions exceed 2048 to keep payload size bounded
+            if img.width > 2048 or img.height > 2048:
+                img.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+
             # Convert image to RGB if necessary for JPEG/PNG
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
 
             buf = io.BytesIO()
-            img.save(buf, format="JPEG")
+            img.save(buf, format="JPEG", quality=85)
             jpeg_bytes = buf.getvalue()
 
+            config = types.GenerateContentConfig(
+                http_options=types.HttpOptions(timeout=int(self.timeout_seconds * 1000)),
+            )
+
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=self.model_name,
                 contents=[
                     types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
                     VISION_PROMPT,
                 ],
+                config=config,
             )
 
             response_text = response.text or ""
         except Exception as exc:
-            logger.exception("Gemini Vision OCR error for %s: %s", filename, exc)
+            err_str = str(exc)
+            if self.api_key:
+                err_str = err_str.replace(self.api_key, "[REDACTED_API_KEY]")
+            err_str = re.sub(r'AIza[0-9A-Za-z-_]{35}', '[REDACTED_API_KEY]', err_str)
+            logger.exception("Gemini Vision OCR error for %s: %s", filename, err_str)
+
+            err_lower = err_str.lower()
+            if any(k in err_lower for k in ("429", "resource_exhausted", "quota", "rate limit")):
+                msg = "Gemini API rate limit or quota exceeded. Please wait a moment or try again later."
+            elif any(k in err_lower for k in ("401", "403", "unauthenticated", "permission_denied", "api_key_invalid")):
+                msg = "Gemini API authentication failed. Please verify your GEMINI_API_KEY configuration."
+            elif any(k in err_lower for k in ("timeout", "timed out", "timeoutexception")):
+                msg = "AI Vision processing timed out. Please try again with a smaller or lower-resolution image."
+            else:
+                msg = f"AI Vision processing failed: {err_str}"
+
             return ExtractionResult(
-                error_message=f"AI Vision processing failed: {str(exc)}",
+                error_message=msg,
                 source_filename=filename,
             )
 
@@ -125,6 +152,13 @@ class VisionExtractor(BaseExtractor):
 
         formatted_blocks = [q.to_formatted_block(default_number=i) for i, q in enumerate(extracted_questions, start=1)]
         raw_text = "\n\n".join(formatted_blocks)
+        duration = time.monotonic() - start_time
+        logger.info(
+            "AI Vision extraction completed: file=%s, duration=%.2fs, questions_found=%d",
+            filename,
+            duration,
+            len(extracted_questions),
+        )
 
         return ExtractionResult(
             questions=extracted_questions,
@@ -138,3 +172,12 @@ class VisionExtractor(BaseExtractor):
         with open(file_path, "rb") as f:
             content = f.read()
         return self.extract_from_bytes(content, filename=file_path)
+
+    async def extract_async(self, content: bytes, filename: str) -> ExtractionResult:
+        """Asynchronously extract questions from image bytes outside the event loop."""
+        import asyncio
+        return await asyncio.to_thread(self.extract_from_bytes, content, filename)
+
+    async def extract_from_bytes_async(self, content: bytes, filename: str) -> ExtractionResult:
+        """Alias for extract_async."""
+        return await self.extract_async(content, filename)

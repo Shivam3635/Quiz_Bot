@@ -1,10 +1,13 @@
 """Unit tests for Solution 1: Extended Option Length Handling (Text Block + Letter Poll)."""
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError, TimedOut
 
 from app.parser.models import QuizQuestion, QuizSettings
 from app.parser.validator import QuizValidator
+from app.services.publishing_service import PublishingService
 from app.services.telegram_service import (
     TelegramService,
     format_extended_question_message,
@@ -102,7 +105,7 @@ async def test_publish_normal_question_untouched():
         settings=settings,
     )
 
-    assert result is True
+    assert result.success is True
     # Crucial: bot.send_message must NOT be called for normal questions!
     bot.send_message.assert_not_called()
 
@@ -135,7 +138,7 @@ async def test_publish_extended_question_solution1():
         settings=settings,
     )
 
-    assert result is True
+    assert result.success is True
 
     # 1. bot.send_message MUST be called with full question text and uncompressed options
     bot.send_message.assert_called_once()
@@ -187,3 +190,286 @@ async def test_mixed_batch_publishing():
     assert bot.send_message.call_count == 1
     assert bot.send_poll.call_count == 1
     assert bot.send_poll.call_args.kwargs["options"] == ["Option A", "Option B"]
+
+
+# ============================================================================
+# ENG-501: Partial Failure & Orphaned Text Block Cleanup Tests
+# ============================================================================
+
+
+@pytest.fixture
+def extended_question_fixture() -> QuizQuestion:
+    return QuizQuestion(
+        question="What is the significance of the 1919 treaty?",
+        options=["Detailed bilingual option that is longer than 100 characters " * 3, "Short option B"],
+        correct_option=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extended_option_text_and_poll_both_succeed(extended_question_fixture):
+    """When both text message and poll succeed, no deletion is attempted."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 999
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.return_value = MagicMock()
+
+    res = await service.publish_single_quiz(
+        bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+    )
+    assert res.success is True
+    bot.send_message.assert_called_once()
+    bot.send_poll.assert_called_once()
+    bot.delete_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_extended_option_text_fails(extended_question_fixture):
+    """When initial text message fails, poll and deletion are never attempted."""
+    service = TelegramService()
+    bot = AsyncMock()
+    bot.send_message.side_effect = BadRequest("Chat not found")
+
+    with pytest.raises(BadRequest, match="Chat not found"):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+    bot.send_message.assert_called_once()
+    bot.send_poll.assert_not_called()
+    bot.delete_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_extended_option_text_succeeds_poll_bad_request_triggers_cleanup(extended_question_fixture):
+    """When poll fails with BadRequest, orphaned text message is deleted and original error is preserved."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 101
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = BadRequest("Poll options must be non-empty")
+
+    with pytest.raises(BadRequest, match="Poll options must be non-empty"):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+    bot.send_message.assert_called_once()
+    bot.send_poll.assert_called_once()
+    bot.delete_message.assert_called_once_with(chat_id="@channel", message_id=101)
+
+
+@pytest.mark.asyncio
+async def test_extended_option_text_succeeds_poll_forbidden_triggers_cleanup(extended_question_fixture):
+    """When poll fails with Forbidden, orphaned text message is deleted and original error is preserved."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 102
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = Forbidden("Bot was kicked from channel")
+
+    with pytest.raises(Forbidden, match="Bot was kicked from channel"):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+    bot.delete_message.assert_called_once_with(chat_id="@channel", message_id=102)
+
+
+@pytest.mark.asyncio
+async def test_extended_option_text_succeeds_poll_timed_out_no_cleanup(extended_question_fixture):
+    """When poll times out, text message MUST NOT be deleted because delivery outcome is uncertain."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 103
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = TimedOut("Network connection lost")
+
+    with pytest.raises(TimedOut, match="Network connection lost"):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+    bot.send_message.assert_called_once()
+    bot.send_poll.assert_called_once()
+    # CRITICAL: delete_message must NOT be called on timeout!
+    bot.delete_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_extended_option_cleanup_deletion_failure_handled_safely(extended_question_fixture):
+    """When cleanup delete_message fails, deletion error is logged and original poll error is preserved."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 104
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = BadRequest("Invalid poll structure")
+    bot.delete_message.side_effect = TelegramError("Message cannot be deleted (insufficient rights)")
+
+    with pytest.raises(BadRequest, match="Invalid poll structure"):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+    bot.delete_message.assert_called_once_with(chat_id="@channel", message_id=104)
+
+
+@pytest.mark.asyncio
+async def test_extended_option_fallback_poll_failure_triggers_cleanup(extended_question_fixture):
+    """When rich poll fails entity parsing and fallback plain text poll also fails, cleanup occurs."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 105
+    bot.send_message.return_value = mock_msg
+    # First call: parse error, second call: BadRequest
+    bot.send_poll.side_effect = [
+        TelegramError("can't parse entities in poll title"),
+        BadRequest("Poll creation rejected"),
+    ]
+
+    with pytest.raises(BadRequest, match="Poll creation rejected"):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+    assert bot.send_poll.call_count == 2
+    bot.delete_message.assert_called_once_with(chat_id="@channel", message_id=105)
+
+
+@pytest.mark.asyncio
+async def test_extended_option_poll_retry_after_once_succeeds(extended_question_fixture):
+    """When poll receives RetryAfter once, ONLY poll is retried; text message is sent exactly once."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 201
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = [RetryAfter(0), True]
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        res = await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+
+    assert res.success is True
+    # The text message must be sent exactly once!
+    assert bot.send_message.call_count == 1
+    assert bot.send_poll.call_count == 2
+    bot.delete_message.assert_not_called()
+    assert res.flood_waited is True
+
+
+@pytest.mark.asyncio
+async def test_extended_option_poll_retry_after_twice_succeeds_crucial_assertion(extended_question_fixture):
+    """
+    CRUCIAL ASSERTION:
+    When text message succeeds and poll receives RetryAfter twice before succeeding:
+    send_message.call_count == 1
+    send_poll.call_count == 3
+    """
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 202
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = [RetryAfter(0), RetryAfter(0), True]
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        res = await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+
+    assert res.success is True
+    assert bot.send_message.call_count == 1
+    assert bot.send_poll.call_count == 3
+    bot.delete_message.assert_not_called()
+    assert res.flood_waited is True
+
+
+@pytest.mark.asyncio
+async def test_extended_option_poll_max_retries_exhausted_deletes_text(extended_question_fixture):
+    """When poll exhausts MAX_FLOOD_RETRIES, text message is deleted and TelegramError is raised."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 203
+    bot.send_message.return_value = mock_msg
+    # 4 consecutive RetryAfter responses (exceeds default MAX_FLOOD_RETRIES=3)
+    bot.send_poll.side_effect = [RetryAfter(0), RetryAfter(0), RetryAfter(0), RetryAfter(0)]
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(TelegramError, match="Flood control limit reached on poll"):
+            await service.publish_single_quiz(
+                bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+            )
+
+    assert bot.send_message.call_count == 1
+    assert bot.send_poll.call_count == 4
+    bot.delete_message.assert_called_once_with(chat_id="@channel", message_id=203)
+
+
+@pytest.mark.asyncio
+async def test_extended_option_poll_cancellation_propagated(extended_question_fixture):
+    """asyncio.CancelledError raised during poll execution is propagated and does NOT delete text."""
+    service = TelegramService()
+    bot = AsyncMock()
+    mock_msg = MagicMock()
+    mock_msg.message_id = 204
+    bot.send_message.return_value = mock_msg
+    bot.send_poll.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.publish_single_quiz(
+            bot=bot, chat_id="@channel", question=extended_question_fixture, settings=QuizSettings()
+        )
+
+    assert bot.send_message.call_count == 1
+    bot.delete_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_malformed_unicode_surrogate_publishing_safety():
+    """Verify that questions with lone surrogates produce controlled errors and never call Telegram API."""
+    service = TelegramService()
+    bot = AsyncMock()
+
+    malformed_q = QuizQuestion.model_construct(
+        question="What is this \ud800 character?",
+        options=["Option A", "Option B"],
+        correct_option=0,
+    )
+
+    # 1. Direct publish_single_quiz raises TelegramError before sending to Telegram
+    with pytest.raises(TelegramError, match="contains unencodable Unicode surrogate characters"):
+        await service.publish_single_quiz(
+            bot=bot,
+            chat_id="@channel",
+            question=malformed_q,
+            settings=QuizSettings(),
+        )
+
+    bot.send_message.assert_not_called()
+    bot.send_poll.assert_not_called()
+
+    # 2. Batch publishing handles it gracefully as a controlled failed question without unhandled exceptions
+    pub_service = PublishingService(telegram_service=service)
+    valid_q = QuizQuestion(
+        question="What is 2 + 2?",
+        options=["3", "4", "5", "6"],
+        correct_option=1,
+    )
+
+    summary = await pub_service.publish_batch(
+        bot=bot,
+        target_chat_id="@channel",
+        questions=[valid_q, malformed_q],
+        settings=QuizSettings(header_banner_enabled=False),
+    )
+
+    assert summary.total == 2
+    assert summary.successful == 1
+    assert summary.failed == 1
+    assert len(summary.failed_items) == 1
+    assert summary.failed_items[0].is_uncertain is False
+    assert "surrogate" in summary.failed_items[0].error_message

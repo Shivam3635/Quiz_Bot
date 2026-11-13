@@ -465,7 +465,7 @@ async def receive_republish_dest_message(update: Update, context: ContextTypes.D
         bot = context.bot
         valid, msg, chat_id = await telegram_service.validate_channel_access(bot, text)
         if valid:
-            settings.channel_id = text
+            settings.channel_id = str(chat_id) if chat_id is not None else text
             context.user_data["quiz_settings"] = settings
             if quiz_set_id:
                 try:
@@ -506,7 +506,7 @@ async def receive_republish_dest_message(update: Update, context: ContextTypes.D
     else:
         # Validate channel access
         bot = context.bot
-        valid, msg, _ = await telegram_service.validate_channel_access(bot, dest_text)
+        valid, msg, chat_id = await telegram_service.validate_channel_access(bot, dest_text)
         if not valid:
             retry_kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 Back to Quiz", callback_data=f"view_quiz_{quiz_set_id}")],
@@ -518,8 +518,9 @@ async def receive_republish_dest_message(update: Update, context: ContextTypes.D
             )
             context.user_data["waiting_for_republish_dest_for"] = quiz_set_id
             return True
-        context.user_data[f"custom_dest_{quiz_set_id}"] = dest_text
-        target_name = dest_text
+        canonical_dest = str(chat_id) if chat_id is not None else dest_text
+        context.user_data[f"custom_dest_{quiz_set_id}"] = canonical_dest
+        target_name = canonical_dest
 
     confirm_kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Publish Now", callback_data=f"execute_republish_{quiz_set_id}")],
@@ -540,108 +541,121 @@ async def execute_republish_callback(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     if not query or not query.data:
         return
-    await query.answer("Initiating publication...")
 
-    quiz_set_id = int(query.data.split("_")[-1])
-    user_id = update.effective_user.id if update.effective_user else 0
+    # Idempotency lock: prevent duplicate concurrent publishing from rapid clicks
+    if context.user_data.get("is_publishing"):
+        try:
+            await query.answer("⚠️ Publishing is already in progress. Please wait.", show_alert=True)
+        except Exception:
+            pass
+        return
 
-    with SessionLocal() as db:
-        quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
-        if not quiz_set or not quiz_set.questions:
-            if query.message:
-                await query.edit_message_text("⚠️ Quiz set contains no questions.")
-            return
-
-        questions, settings = reconstruct_quiz_data(quiz_set)
-        # Requirement 5: publish all questions of the quiz without timer in same or target group depending on choice
-        settings.time_limit = None
-
-    # Check for custom destination override
-    custom_dest = context.user_data.get(f"custom_dest_{quiz_set_id}")
-    if custom_dest is not None:
-        settings.channel_id = custom_dest
-
-    bot = context.bot
-    target_chat = settings.channel_id if settings.channel_id else query.message.chat_id
-
-    # Create job in database
-    db_job_id = None
+    context.user_data["is_publishing"] = True
     try:
+        await query.answer("Initiating publication...")
+
+        quiz_set_id = int(query.data.split("_")[-1])
+        user_id = update.effective_user.id if update.effective_user else 0
+
         with SessionLocal() as db:
-            job = create_publish_job(db, quiz_set_id=quiz_set_id, total=len(questions))
-            db_job_id = job.id
-    except Exception as db_err:
-        logger.warning("Could not persist publish job: %s", db_err)
+            quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
+            if not quiz_set or not quiz_set.questions:
+                if query.message:
+                    await query.edit_message_text("⚠️ Quiz set contains no questions.")
+                return
 
-    # Initial Progress Message
-    progress_msg = await query.edit_message_text(
-        f"🚀 <b>Publishing {len(questions)} quiz(zes) to {target_chat}...</b>\n\n"
-        "░░░░░░░░░░░░░░░\n\n"
-        f"<b>0 / {len(questions)}</b> processed",
-        parse_mode=ParseMode.HTML,
-    )
+            questions, settings = reconstruct_quiz_data(quiz_set)
+            # Requirement 5: publish all questions of the quiz without timer in same or target group depending on choice
+            settings.time_limit = None
 
-    last_update_count = 0
+        # Check for custom destination override
+        custom_dest = context.user_data.get(f"custom_dest_{quiz_set_id}")
+        if custom_dest is not None:
+            settings.channel_id = custom_dest
 
-    async def update_progress(completed: int, total: int, status_body: str):
-        nonlocal last_update_count
-        if completed - last_update_count >= 2 or completed == total:
-            last_update_count = completed
-            try:
-                await progress_msg.edit_text(
-                    f"🚀 <b>Publishing to {target_chat}...</b>\n\n{status_body}",
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception as e:
-                logger.debug("Progress edit rate limit: %s", e)
+        bot = context.bot
+        target_chat = settings.channel_id if settings.channel_id else query.message.chat_id
 
-    # Publish batch
-    summary: PublishingSummary = await publishing_service.publish_batch(
-        bot=bot,
-        target_chat_id=target_chat,
-        questions=questions,
-        settings=settings,
-        progress_callback=update_progress,
-    )
-
-    # Update database job
-    if db_job_id:
+        # Create job in database
+        db_job_id = None
         try:
             with SessionLocal() as db:
-                complete_publish_job(
-                    db,
-                    job_id=db_job_id,
-                    successful=summary.successful,
-                    failed=summary.failed,
-                    status="completed" if summary.is_complete_success else "partially_failed",
-                )
+                job = create_publish_job(db, quiz_set_id=quiz_set_id, total=len(questions))
+                db_job_id = job.id
         except Exception as db_err:
-            logger.warning("Could not update publish job: %s", db_err)
+            logger.warning("Could not persist publish job: %s", db_err)
 
-    # Final summary message
-    final_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 View Quiz Details", callback_data=f"view_quiz_{quiz_set_id}")],
-        [InlineKeyboardButton("📚 Back to My Quizzes", callback_data="my_quizzes_list_0")],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="action_main_menu")],
-    ])
-
-    if summary.is_complete_success:
-        res_text = (
-            "🎉 <b>Publish Complete!</b>\n\n"
-            f"• Quiz: <b>{settings.title or 'Untitled Quiz'}</b>\n"
-            f"• Successfully published: <b>{summary.successful} / {summary.total}</b>\n"
-            f"• Destination: <b>{target_chat}</b>\n\n"
-            "All quiz polls are now active in the target chat!"
-        )
-    else:
-        res_text = (
-            "⚠️ <b>Publish Finished with Warnings</b>\n\n"
-            f"• Successfully published: <b>{summary.successful} / {summary.total}</b>\n"
-            f"• Failed: <b>{summary.failed}</b>\n"
-            f"• Destination: <b>{target_chat}</b>"
+        # Initial Progress Message
+        progress_msg = await query.edit_message_text(
+            f"🚀 <b>Publishing {len(questions)} quiz(zes) to {target_chat}...</b>\n\n"
+            "░░░░░░░░░░░░░░░\n\n"
+            f"<b>0 / {len(questions)}</b> processed",
+            parse_mode=ParseMode.HTML,
         )
 
-    await progress_msg.edit_text(res_text, reply_markup=final_kb, parse_mode=ParseMode.HTML)
+        last_update_count = 0
+
+        async def update_progress(completed: int, total: int, status_body: str):
+            nonlocal last_update_count
+            if completed - last_update_count >= 2 or completed == total:
+                last_update_count = completed
+                try:
+                    await progress_msg.edit_text(
+                        f"🚀 <b>Publishing to {target_chat}...</b>\n\n{status_body}",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception as e:
+                    logger.debug("Progress edit rate limit: %s", e)
+
+        # Publish batch
+        summary: PublishingSummary = await publishing_service.publish_batch(
+            bot=bot,
+            target_chat_id=target_chat,
+            questions=questions,
+            settings=settings,
+            progress_callback=update_progress,
+        )
+
+        # Update database job
+        if db_job_id:
+            try:
+                with SessionLocal() as db:
+                    complete_publish_job(
+                        db,
+                        job_id=db_job_id,
+                        successful=summary.successful,
+                        failed=summary.failed,
+                        status="completed" if summary.is_complete_success else "partially_failed",
+                    )
+            except Exception as db_err:
+                logger.warning("Could not update publish job: %s", db_err)
+
+        # Final summary message
+        final_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 View Quiz Details", callback_data=f"view_quiz_{quiz_set_id}")],
+            [InlineKeyboardButton("📚 Back to My Quizzes", callback_data="my_quizzes_list_0")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="action_main_menu")],
+        ])
+
+        if summary.is_complete_success:
+            res_text = (
+                "🎉 <b>Publish Complete!</b>\n\n"
+                f"• Quiz: <b>{settings.title or 'Untitled Quiz'}</b>\n"
+                f"• Successfully published: <b>{summary.successful} / {summary.total}</b>\n"
+                f"• Destination: <b>{target_chat}</b>\n\n"
+                "All quiz polls are now active in the target chat!"
+            )
+        else:
+            res_text = (
+                "⚠️ <b>Publish Finished with Warnings</b>\n\n"
+                f"• Successfully published: <b>{summary.successful} / {summary.total}</b>\n"
+                f"• Failed: <b>{summary.failed}</b>\n"
+                f"• Destination: <b>{target_chat}</b>"
+            )
+
+        await progress_msg.edit_text(res_text, reply_markup=final_kb, parse_mode=ParseMode.HTML)
+    finally:
+        context.user_data.pop("is_publishing", None)
 
 
 async def delete_saved_quiz_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

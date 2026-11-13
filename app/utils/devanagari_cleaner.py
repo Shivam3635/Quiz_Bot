@@ -55,7 +55,7 @@ NIRMALA_WORD_REPLACEMENTS: dict[str, str] = {
     "रचकयता": "रचयिता",
     "बंककम": "बंकिम",
     "सरोकजनी": "सरोजिनी",
-    "कबहू": "बिहू",
+    "कबहू नृत्य": "बिहू नृत्य",
     "कबहार": "बिहार",
     "प्रकसद्ध": "प्रसिद्ध",
     "कसंह": "सिंह",
@@ -221,6 +221,20 @@ NIRMALA_WORD_REPLACEMENTS: dict[str, str] = {
     "िूध": "दूध",
 }
 
+# Boundaries for Devanagari and Latin alphanumeric tokens to avoid corrupting substrings
+DEV_LEFT_BOUNDARY = r"(?<![\u0900-\u097fA-Za-z0-9])"
+DEV_RIGHT_BOUNDARY = r"(?![\u0900-\u097fA-Za-z0-9])"
+
+# Pre-compile boundary-aware regular expression sorted by length descending so multi-word / longer tokens match first
+_NIRMALA_SORTED_KEYS = sorted(NIRMALA_WORD_REPLACEMENTS.keys(), key=len, reverse=True)
+_NIRMALA_WORD_RE = re.compile(
+    DEV_LEFT_BOUNDARY
+    + r"(?:"
+    + "|".join(re.escape(k) for k in _NIRMALA_SORTED_KEYS)
+    + r")"
+    + DEV_RIGHT_BOUNDARY
+)
+
 # Regex to strip spaces before Devanagari combining vowel signs (matras),
 # anusvara, candrabindu, visarga, nukta, and virama.
 # Range covers:
@@ -241,7 +255,7 @@ DEVANAGARI_VIRAMA_SPACE_RE = re.compile(
 def clean_devanagari_text(text: str) -> str:
     """Normalize and fix distorted Devanagari / Hindi text.
 
-    - Resolves Nirmala UI font CMap export corruptions (e.g. कबंदु -> बिंदु, स्थिकत -> स्थिति).
+    - Resolves Nirmala UI font CMap export corruptions with boundary-aware matching.
     - Removes spurious spacing before combining marks and matras (e.g. इन्फ ैं -> इन्फैं).
     - Recombines split syllables inside words.
     """
@@ -252,12 +266,8 @@ def clean_devanagari_text(text: str) -> str:
     if not any("\u0900" <= ch <= "\u097f" for ch in text):
         return text
 
-    result = text
-
-    # 1. Apply known dictionary replacements first
-    for bad, good in NIRMALA_WORD_REPLACEMENTS.items():
-        if bad in result:
-            result = result.replace(bad, good)
+    # 1. Apply known dictionary replacements using boundary-aware regex matching
+    result = _NIRMALA_WORD_RE.sub(lambda m: NIRMALA_WORD_REPLACEMENTS[m.group(0)], text)
 
     # 2. Strip spurious spaces before combining signs and matras
     result = DEVANAGARI_COMBINING_SPACE_RE.sub(r"\1", result)
