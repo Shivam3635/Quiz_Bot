@@ -1,4 +1,4 @@
-name: CI — Staging & Production Quality Gates
+name: CI/CD — Quality Gates & Staging Deployment
 
 on:
   workflow_dispatch:
@@ -15,15 +15,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   ci-pipeline:
     name: Continuous Integration & Quality Gates
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
 
     env:
       ENVIRONMENT: testing
@@ -78,3 +77,55 @@ jobs:
         # verifying staging auth, database isolation, parsers, validators, handlers, and serializers.
         run: |
           pytest -v --tb=short
+
+  deploy-staging:
+    name: Automated Staging Deployment & Health Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: ci-pipeline
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    concurrency:
+      group: staging-deployment
+      cancel-in-progress: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Trigger Render Staging Deployment
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::error::Secret RENDER_STAGING_DEPLOY_HOOK is not configured in repository secrets."
+            echo "Automated staging deployment cannot trigger without this webhook URL."
+            echo "Please set RENDER_STAGING_DEPLOY_HOOK in GitHub Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          echo "Triggering Render staging deployment for target commit: ${TARGET_SHA}"
+
+          if [[ "$DEPLOY_HOOK_URL" == *"?"* ]]; then
+            TRIGGER_URL="${DEPLOY_HOOK_URL}&ref=${TARGET_SHA}"
+          else
+            TRIGGER_URL="${DEPLOY_HOOK_URL}?ref=${TARGET_SHA}"
+          fi
+
+          curl -fsS -X POST "$TRIGGER_URL"
+          echo ""
+          echo "Deploy hook successfully triggered."
+
+      - name: Verify Staging Health and Deployed Commit SHA
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          HEALTH_URL: "https://quizbotpro-staging.onrender.com/health"
+          TIMEOUT_SECONDS: "300"
+          POLL_INTERVAL: "10"
+        run: |
+          python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL"

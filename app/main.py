@@ -1,8 +1,10 @@
+import json
 import os
 import sys
 import threading
 import warnings
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from telegram.warnings import PTBUserWarning
 
 warnings.filterwarnings("ignore", category=PTBUserWarning)
@@ -387,17 +389,55 @@ def create_bot_app() -> Application:
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Minimal HTTP handler to satisfy Render/cloud health checks."""
+    """Minimal HTTP handler to satisfy Render/cloud health checks and version verification."""
 
     def do_GET(self) -> None:
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b"OK - QuizBotPro is active and healthy")
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path in ("/health", "/version", "/status"):
+            try:
+                env_name = get_settings().ENVIRONMENT
+            except Exception:  # noqa: BLE001
+                env_name = os.environ.get("ENVIRONMENT", "unknown")
+
+            payload = {
+                "status": "healthy",
+                "commit": os.environ.get("RENDER_GIT_COMMIT", "local-dev"),
+                "environment": env_name,
+            }
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif clean_path == "":
+            # Root path '/' backward-compatible response for existing Render health check
+            body = b"OK - QuizBotPro is active and healthy"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            body = b"Not Found"
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     def do_HEAD(self) -> None:
-        self.send_response(200)
-        self.end_headers()
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path in ("", "/health", "/version", "/status"):
+            self.send_response(200)
+            if clean_path == "":
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+            else:
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
         # Suppress routine health check request logs to keep terminal logs clean
