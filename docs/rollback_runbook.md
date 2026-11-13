@@ -74,6 +74,15 @@ Because all schema modifications are additive:
 - **Application rollbacks require NO database rollbacks.** Older application versions safely ignore newly added columns.
 - Rollback risk is decoupled from database storage.
 
+### Schema Evolution Tooling & Migration Limitations
+
+- **`Base.metadata.create_all()` & `--init` Scope**:
+  `Base.metadata.create_all()` issues `CREATE TABLE IF NOT EXISTS`. It creates **missing tables only** and does **not** alter, add, or drop columns on existing tables. The CLI command `python -m app.database.database --init` is strictly an idempotent bootstrap utility for new environments, not a versioned migration engine.
+- **Future Schema Modifications**:
+  Any future modifications to existing tables (adding columns, altering types, creating complex indexes) require explicit, versioned database migration tooling (such as **Alembic**). Migration scripts must be validated on staging and executed prior to application deployment.
+- **Milestone 5 Scope**:
+  **No production migration is performed by Milestone 5.** The production database schema remains completely untouched and verified.
+
 ### Point-in-Time Recovery (PITR) for Catastrophic Data Incidents
 
 > [!WARNING]

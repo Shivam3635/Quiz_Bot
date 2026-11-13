@@ -458,7 +458,15 @@ def init_db(
     target_engine: Engine | None = None,
     app_settings: Settings | None = None,
 ) -> None:
-    """Create all tables in the database and ensure column migrations after identity verification.
+    """Create missing tables in the database after identity verification.
+
+    SCHEMA EVOLUTION & MIGRATION LIMITATIONS:
+    - Base.metadata.create_all() issues CREATE TABLE IF NOT EXISTS.
+    - It creates MISSING tables only. It does NOT alter, add, or drop columns on existing tables.
+    - init_db() and CLI --init are idempotent bootstrap tools, NOT a versioned migration engine.
+    - Future non-additive or existing-table schema modifications require explicit versioned
+      migration tooling (such as Alembic) applied prior to application deployment.
+    - Milestone 5 (M5) release engineering performs NO production schema migrations.
 
     Guarantees that database identity verification and DDL creation use the EXACT SAME
     physical connection:
@@ -532,7 +540,10 @@ def cli_main() -> None:
     parser.add_argument(
         "--init",
         action="store_true",
-        help="Execute init_db() to create missing tables on verified connection",
+        help="Bootstrap missing tables via Base.metadata.create_all() on verified connection. "
+        "NOTE: create_all() creates missing tables only and does NOT alter existing tables. "
+        "It is not a versioned migration engine. Future modifications to existing tables "
+        "require explicit versioned migrations (e.g. Alembic). No migrations are run by M5.",
     )
 
     args = parser.parse_args()
@@ -569,6 +580,7 @@ def cli_main() -> None:
 
             if args.init:
                 print("\nStep 3: Creating missing tables (Base.metadata.create_all)...")
+                print("  Note: create_all() creates missing tables only; existing tables are not modified.")
                 Base.metadata.create_all(bind=conn)
                 print(" [PASS] Missing tables created successfully.")
                 sys.exit(0)

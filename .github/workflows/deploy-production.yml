@@ -1,17 +1,6 @@
 name: Production Release & Exact-SHA Deployment
 
 on:
-  workflow_dispatch:
-    inputs:
-      target_commit_sha:
-        description: "Target 40-character commit SHA (leave empty to deploy current main HEAD)"
-        required: false
-        default: ""
-      release_reason:
-        description: "Reason or changelog summary for manual release trigger"
-        required: false
-        default: "Production release execution"
-
   push:
     branches:
       - main
@@ -24,7 +13,6 @@ jobs:
     name: Production Pre-Release Quality Gates
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/main'
     concurrency:
       group: ci-production-${{ github.ref }}
       cancel-in-progress: true
@@ -38,8 +26,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.target_commit_sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -88,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     needs: production-ci
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     environment:
       name: production
@@ -101,8 +87,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.target_commit_sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -112,15 +96,8 @@ jobs:
       - name: Trigger Render Production Deployment
         env:
           DEPLOY_HOOK_URL: ${{ secrets.RENDER_PRODUCTION_DEPLOY_HOOK }}
-          RAW_TARGET_SHA: ${{ github.event.inputs.target_commit_sha || github.sha }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
-          TARGET_SHA="$(echo "$RAW_TARGET_SHA" | tr -d '[:space:]')"
-
-          if [[ ! "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "::error::Invalid target commit SHA: '$TARGET_SHA'. Production deployment requires a full 40-character hexadecimal SHA."
-            exit 1
-          fi
-
           if [ -z "$DEPLOY_HOOK_URL" ]; then
             echo "::error::Secret RENDER_PRODUCTION_DEPLOY_HOOK is not configured in repository or environment secrets."
             echo "Production deployment cannot proceed without RENDER_PRODUCTION_DEPLOY_HOOK."
@@ -142,10 +119,9 @@ jobs:
 
       - name: Verify Production Health and Deployed Commit SHA
         env:
-          RAW_TARGET_SHA: ${{ github.event.inputs.target_commit_sha || github.sha }}
+          TARGET_SHA: ${{ github.sha }}
           HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL || 'https://quizbotpro.onrender.com/health' }}
           TIMEOUT_SECONDS: "360"
           POLL_INTERVAL: "10"
         run: |
-          TARGET_SHA="$(echo "$RAW_TARGET_SHA" | tr -d '[:space:]')"
           python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL"

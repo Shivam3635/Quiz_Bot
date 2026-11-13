@@ -34,13 +34,14 @@ def test_production_workflow_yaml_validity():
 
 
 def test_production_workflow_triggers_and_branch_isolation():
-    """Ensure deploy-production.yml is restricted to main branch and does not trigger on develop."""
+    """Ensure deploy-production.yml is restricted to push to main and does not permit workflow_dispatch or develop."""
     content = _get_workflow_content()
 
-    # Must contain push to main and workflow_dispatch
+    # Must contain push to main only (no workflow_dispatch)
     assert "push:" in content
     assert "branches:" in content
     assert re.search(r"branches:\s*-\s*main", content), "Must trigger on push to main"
+    assert "workflow_dispatch:" not in content, "Production workflow must not allow manual workflow_dispatch"
 
     # Must NOT list develop in push branches
     push_section = re.search(r"push:.*?(?=permissions:|\n\w+:)", content, re.DOTALL)
@@ -69,7 +70,7 @@ def test_production_deployment_job_security_and_gates():
     assert "Trigger Render Production Deployment" in content
     assert "Verify Production Health" in content
     assert "RENDER_PRODUCTION_DEPLOY_HOOK" in content
-    assert "github.event.inputs.target_commit_sha || github.sha" in content
+    assert "TARGET_SHA: ${{ github.sha }}" in content
     assert "TARGET_SHA" in content
     assert ".github/verify_deployment.py" in content
 
@@ -126,3 +127,21 @@ def test_operational_documentation_files_exist():
     for doc in docs:
         assert doc.is_file(), f"Expected documentation file {doc.name} must exist"
         assert doc.stat().st_size > 500, f"Documentation file {doc.name} must contain meaningful content"
+
+
+def test_database_schema_evolution_documentation_and_limitations():
+    """Verify schema lifecycle documentation clarifies create_all scope, Alembic requirement, and M5 boundaries."""
+    from app.database.database import init_db
+
+    doc = init_db.__doc__ or ""
+    assert "Base.metadata.create_all()" in doc
+    assert "missing tables only" in doc.lower() or "missing tables" in doc.lower()
+    assert "alembic" in doc.lower()
+    assert "milestone 5" in doc.lower() or "m5" in doc.lower()
+
+    runbook_path = Path(__file__).resolve().parent.parent / "docs" / "rollback_runbook.md"
+    runbook_content = runbook_path.read_text(encoding="utf-8")
+    assert "Base.metadata.create_all()" in runbook_content
+    assert "missing tables only" in runbook_content.lower()
+    assert "alembic" in runbook_content.lower()
+    assert "milestone 5" in runbook_content.lower()
