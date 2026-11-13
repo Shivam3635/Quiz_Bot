@@ -54,6 +54,18 @@ def reset_shared_pacer():
 
 
 @pytest.fixture
+def fresh_lock_manager() -> ChatLockManager:
+    """Provide an isolated, function-scoped ChatLockManager for test isolation."""
+    return ChatLockManager()
+
+
+@pytest.fixture
+def fresh_pacer() -> ChatPacer:
+    """Provide an isolated, function-scoped ChatPacer for test isolation."""
+    return ChatPacer()
+
+
+@pytest.fixture
 def sample_questions() -> list[QuizQuestion]:
     return [
         QuizQuestion(question="Q1?", options=["A", "B"], correct_option=0),
@@ -76,7 +88,7 @@ class TestTimeoutClassificationAndRetryUX:
     """Verifies timeout classification, structured failed records, and safe retry UX."""
 
     @pytest.mark.asyncio
-    async def test_timeout_classified_as_uncertain(self, sample_questions, default_settings):
+    async def test_timeout_classified_as_uncertain(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """TimedOut exception must be classified with is_uncertain=True and delivery_status='uncertain'."""
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(
@@ -86,7 +98,11 @@ class TestTimeoutClassificationAndRetryUX:
                 True,  # Q3 OK
             ]
         )
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
 
         mock_bot = MagicMock(spec=Bot)
@@ -111,7 +127,7 @@ class TestTimeoutClassificationAndRetryUX:
         assert "timed out" in failed_item.error_message.lower()
 
     @pytest.mark.asyncio
-    async def test_bad_request_classified_as_definitive_failure(self, sample_questions, default_settings):
+    async def test_bad_request_classified_as_definitive_failure(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """BadRequest exception must be classified with is_uncertain=False and delivery_status='failed'."""
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(
@@ -121,7 +137,11 @@ class TestTimeoutClassificationAndRetryUX:
                 True,
             ]
         )
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
 
         mock_bot = MagicMock(spec=Bot)
@@ -206,7 +226,7 @@ class TestImprovedRetryAfterHandling:
     """Verifies configurable bounded RetryAfter flood-control loop and error escalation."""
 
     @pytest.mark.asyncio
-    async def test_single_retry_after_succeeds(self, sample_questions, default_settings):
+    async def test_single_retry_after_succeeds(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """Single flood control wait is honored and succeeds on next attempt."""
         mock_telegram = MagicMock(spec=TelegramService)
         # Q1 triggers RetryAfter(2), then succeeds
@@ -218,7 +238,11 @@ class TestImprovedRetryAfterHandling:
                 True,  # Q3
             ]
         )
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
         service.settings.MAX_FLOOD_RETRIES = 3
 
@@ -238,7 +262,7 @@ class TestImprovedRetryAfterHandling:
         mock_sleep.assert_any_call(3)
 
     @pytest.mark.asyncio
-    async def test_multiple_retry_after_succeeds_within_bounds(self, sample_questions, default_settings):
+    async def test_multiple_retry_after_succeeds_within_bounds(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """Multiple consecutive RetryAfter responses succeed within MAX_FLOOD_RETRIES."""
         mock_telegram = MagicMock(spec=TelegramService)
         # Q1 triggers RetryAfter(1) twice, then succeeds on attempt 3
@@ -251,7 +275,11 @@ class TestImprovedRetryAfterHandling:
                 True,  # Q3
             ]
         )
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
         service.settings.MAX_FLOOD_RETRIES = 3
 
@@ -270,7 +298,7 @@ class TestImprovedRetryAfterHandling:
         mock_sleep.assert_any_call(3)
 
     @pytest.mark.asyncio
-    async def test_max_flood_retries_exhausted(self, sample_questions, default_settings):
+    async def test_max_flood_retries_exhausted(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """When MAX_FLOOD_RETRIES is exceeded, the question fails and loop continues to next question."""
         mock_telegram = MagicMock(spec=TelegramService)
         # Q1 triggers RetryAfter continuously
@@ -284,7 +312,11 @@ class TestImprovedRetryAfterHandling:
                 True,  # Q3 OK
             ]
         )
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
         service.settings.MAX_FLOOD_RETRIES = 3
 
@@ -303,7 +335,7 @@ class TestImprovedRetryAfterHandling:
         assert "Flood control limit reached after 3 retries" in summary.failed_items[0].error_message
 
     @pytest.mark.asyncio
-    async def test_retry_after_followed_by_bad_request(self, sample_questions, default_settings):
+    async def test_retry_after_followed_by_bad_request(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """When RetryAfter is followed by a non-retryable BadRequest, fails immediately without further retries."""
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(
@@ -314,7 +346,11 @@ class TestImprovedRetryAfterHandling:
                 True,  # Q3
             ]
         )
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
         service.settings.MAX_FLOOD_RETRIES = 3
 
@@ -332,12 +368,16 @@ class TestImprovedRetryAfterHandling:
         assert "Poll text too long" in summary.failed_items[0].error_message
 
     @pytest.mark.asyncio
-    async def test_cancellation_preserved_during_flood_wait(self, sample_questions, default_settings):
+    async def test_cancellation_preserved_during_flood_wait(self, sample_questions, default_settings, fresh_lock_manager, fresh_pacer):
         """asyncio.CancelledError must not be swallowed during publishing or flood wait."""
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(side_effect=asyncio.CancelledError())
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         mock_bot = MagicMock(spec=Bot)
 
         with pytest.raises(asyncio.CancelledError):
@@ -358,13 +398,17 @@ class TestHeaderBannerAndPacing:
     """Verifies header banner delivery tracking, error reporting, and pacing delays."""
 
     @pytest.mark.asyncio
-    async def test_banner_enabled_and_succeeds(self, sample_questions):
+    async def test_banner_enabled_and_succeeds(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """Header banner is successfully sent and tracked as banner_sent=True."""
         settings = QuizSettings(header_banner_enabled=True)
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(return_value=True)
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
         service.settings.HEADER_BANNER_DELAY = 0.0001
 
@@ -384,13 +428,17 @@ class TestHeaderBannerAndPacing:
         mock_bot.send_message.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_banner_fails_quizzes_continue_and_tracked(self, sample_questions):
+    async def test_banner_fails_quizzes_continue_and_tracked(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """Header banner failure does NOT abort batch and is tracked in banner_failed."""
         settings = QuizSettings(header_banner_enabled=True)
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(return_value=True)
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
 
         mock_bot = MagicMock(spec=Bot)
@@ -411,13 +459,17 @@ class TestHeaderBannerAndPacing:
         assert summary.is_complete_success is True
 
     @pytest.mark.asyncio
-    async def test_banner_disabled_tracked_as_none(self, sample_questions):
+    async def test_banner_disabled_tracked_as_none(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """When header banner is disabled, banner_sent is None and no banner message is sent."""
         settings = QuizSettings(header_banner_enabled=False)
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(return_value=True)
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 0.0001
 
         mock_bot = MagicMock(spec=Bot)
@@ -435,13 +487,17 @@ class TestHeaderBannerAndPacing:
         mock_bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_standard_poll_pacing_delay(self, sample_questions):
+    async def test_standard_poll_pacing_delay(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """Verify that DEFAULT_DELAY_BETWEEN_POSTS is called between posts and NOT after the final post."""
         settings = QuizSettings(header_banner_enabled=False)
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(return_value=True)
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 2.5
 
         mock_bot = MagicMock(spec=Bot)
@@ -459,9 +515,9 @@ class TestHeaderBannerAndPacing:
             assert pytest.approx(call.args[0], abs=0.05) == 2.5
 
     @pytest.mark.asyncio
-    async def test_extended_option_sub_delay_pacing(self):
+    async def test_extended_option_sub_delay_pacing(self, fresh_pacer):
         """Verify that centralized pacer paces between text message and poll."""
-        service = TelegramService()
+        service = TelegramService(pacer=fresh_pacer)
         bot = AsyncMock()
         mock_msg = MagicMock()
         mock_msg.message_id = 999
@@ -487,7 +543,7 @@ class TestHeaderBannerAndPacing:
         assert pytest.approx(mock_sleep.call_args[0][0], abs=0.05) == 3.0
 
     @pytest.mark.asyncio
-    async def test_flood_wait_skips_redundant_post_delay(self, sample_questions):
+    async def test_flood_wait_skips_redundant_post_delay(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """When a question encounters flood control, retry waits flood duration, and subsequent question paces cleanly."""
         settings = QuizSettings(header_banner_enabled=False)
         mock_telegram = MagicMock(spec=TelegramService)
@@ -501,7 +557,11 @@ class TestHeaderBannerAndPacing:
             ]
         )
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 2.5
         service.settings.MAX_FLOOD_RETRIES = 3
 
@@ -525,13 +585,17 @@ class TestHeaderBannerAndPacing:
         assert pytest.approx(mock_sleep.call_args_list[2].args[0], abs=0.05) == 2.5
 
     @pytest.mark.asyncio
-    async def test_header_banner_delay_respected(self, sample_questions):
+    async def test_header_banner_delay_respected(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """When header banner is enabled, HEADER_BANNER_DELAY is respected before Q1."""
         settings = QuizSettings(header_banner_enabled=True)
         mock_telegram = MagicMock(spec=TelegramService)
         mock_telegram.publish_single_quiz = AsyncMock(return_value=True)
 
-        service = PublishingService(telegram_service=mock_telegram)
+        service = PublishingService(
+            telegram_service=mock_telegram,
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         service.settings.HEADER_BANNER_DELAY = 2.0
         service.settings.DEFAULT_DELAY_BETWEEN_POSTS = 2.5
 
@@ -757,9 +821,12 @@ class TestPhase533ConcurrencyIsolation:
     """Verifies per-chat lock serialization, concurrent multi-chat publishing, and operation-local flood state."""
 
     @pytest.mark.asyncio
-    async def test_two_concurrent_publish_batch_to_different_chats(self, sample_questions):
+    async def test_two_concurrent_publish_batch_to_different_chats(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """Operations targeting different chats run concurrently without blocking each other."""
-        service = PublishingService()
+        service = PublishingService(
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         bot = AsyncMock()
 
         executed_chats = []
@@ -791,10 +858,13 @@ class TestPhase533ConcurrencyIsolation:
         assert chat_ids == {101, 102}
 
     @pytest.mark.asyncio
-    async def test_two_concurrent_publish_batch_to_same_chat_serialized(self, sample_questions):
+    async def test_two_concurrent_publish_batch_to_same_chat_serialized(self, sample_questions, fresh_pacer):
         """Operations targeting the same chat execute sequentially; batches do not interleave."""
         lock_manager = ChatLockManager()
-        service = PublishingService(chat_lock_manager=lock_manager)
+        service = PublishingService(
+            chat_lock_manager=lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         bot = AsyncMock()
 
         execution_log = []
@@ -835,9 +905,12 @@ class TestPhase533ConcurrencyIsolation:
         assert max(a_indices) < min(b_indices) or max(b_indices) < min(a_indices)
 
     @pytest.mark.asyncio
-    async def test_concurrent_operations_one_flood_wait_one_succeeds(self, sample_questions):
+    async def test_concurrent_operations_one_flood_wait_one_succeeds(self, sample_questions, fresh_lock_manager, fresh_pacer):
         """A flood wait on one destination chat does NOT block or delay an independent chat."""
-        service = PublishingService()
+        service = PublishingService(
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=fresh_pacer,
+        )
         bot = AsyncMock()
 
         async def fake_publish(bot, chat_id, question, settings):
@@ -980,10 +1053,13 @@ class TestPhase533CentralizedMessagePacing:
     """Verifies ChatPacer tracks monotonic timestamps across all message types and destinations."""
 
     @pytest.mark.asyncio
-    async def test_standard_multiquestion_batch_monotonic_pacing(self, sample_questions):
+    async def test_standard_multiquestion_batch_monotonic_pacing(self, sample_questions, fresh_lock_manager):
         """Standard batch paces 3.0s between each post and terminates immediately after final post."""
         pacer = ChatPacer(pacing_interval=3.0)
-        service = PublishingService(chat_pacer=pacer)
+        service = PublishingService(
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=pacer,
+        )
         bot = AsyncMock()
 
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
@@ -1001,10 +1077,13 @@ class TestPhase533CentralizedMessagePacing:
             assert pytest.approx(call.args[0], abs=0.05) == 3.0
 
     @pytest.mark.asyncio
-    async def test_extended_option_multiquestion_batch_paces_both_text_and_poll(self):
+    async def test_extended_option_multiquestion_batch_paces_both_text_and_poll(self, fresh_lock_manager):
         """Extended question batch paces before text message, before poll, and before subsequent questions."""
         pacer = ChatPacer(pacing_interval=3.0)
-        service = PublishingService(chat_pacer=pacer)
+        service = PublishingService(
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=pacer,
+        )
         bot = AsyncMock()
         mock_msg = MagicMock()
         mock_msg.message_id = 701
@@ -1037,10 +1116,13 @@ class TestPhase533CentralizedMessagePacing:
             assert pytest.approx(call.args[0], abs=0.05) == 3.0
 
     @pytest.mark.asyncio
-    async def test_banner_followed_by_first_question_pacing(self, sample_questions):
+    async def test_banner_followed_by_first_question_pacing(self, sample_questions, fresh_lock_manager):
         """Banner message paces before question 1 with no trailing delay after question 1."""
         pacer = ChatPacer(pacing_interval=3.0)
-        service = PublishingService(chat_pacer=pacer)
+        service = PublishingService(
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=pacer,
+        )
         service.settings.HEADER_BANNER_DELAY = 2.0
         bot = AsyncMock()
         bot.send_message.return_value = MagicMock()
@@ -1062,10 +1144,13 @@ class TestPhase533CentralizedMessagePacing:
         assert pytest.approx(mock_sleep.call_args[0][0], abs=0.05) == 2.0
 
     @pytest.mark.asyncio
-    async def test_retry_after_followed_by_next_question_pacing(self, sample_questions):
+    async def test_retry_after_followed_by_next_question_pacing(self, sample_questions, fresh_lock_manager):
         """When Q1 encounters flood wait, retry occurs after flood wait, and Q2 is spaced by pacing interval."""
         pacer = ChatPacer(pacing_interval=3.0)
-        service = PublishingService(chat_pacer=pacer)
+        service = PublishingService(
+            chat_lock_manager=fresh_lock_manager,
+            chat_pacer=pacer,
+        )
         bot = AsyncMock()
 
         call_count = 0

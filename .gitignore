@@ -54,3 +54,6 @@ logs/
 
 # Local migration scripts
 scripts/
+
+# Local diagnostic and temporary files
+/scratch/
