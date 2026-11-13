@@ -76,6 +76,10 @@ Because all schema modifications are additive:
 
 ### Point-in-Time Recovery (PITR) for Catastrophic Data Incidents
 
+> [!WARNING]
+> **Operational Assumption & Retention Window Verification**:
+> Point-in-Time Recovery strictly depends on the active WAL change history retention window configured in the Neon Console (**Settings > Postgres**). Neon limits retention by plan tier (Free: up to 6h; Launch: up to 7d; Scale: up to 30d; default on paid plans is 1d). Do not assume maximum retention is active. Before attempting PITR, operators must verify in the Neon Console that `current_time - target_timestamp` is within the project's configured retention window.
+
 If unrecoverable data corruption or unintended record deletion occurs:
 1. Identify the exact UTC timestamp 1 minute prior to corruption (e.g. `2026-11-13T14:20:00Z`).
 2. Create an instant recovery branch in Neon Console or CLI:

@@ -70,7 +70,7 @@ jobs:
 
       - name: Run Dependency Vulnerability Audit (pip-audit)
         run: |
-          pip-audit --desc || true
+          pip-audit --desc
 
       - name: Run Complete Authoritative Test Suite (pytest)
         # Executes the full repository test suite with isolated in-memory SQLite database,

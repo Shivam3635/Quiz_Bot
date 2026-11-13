@@ -69,7 +69,8 @@ def test_production_deployment_job_security_and_gates():
     assert "Trigger Render Production Deployment" in content
     assert "Verify Production Health" in content
     assert "RENDER_PRODUCTION_DEPLOY_HOOK" in content
-    assert "TARGET_SHA: ${{ github.sha }}" in content
+    assert "github.event.inputs.target_commit_sha || github.sha" in content
+    assert "TARGET_SHA" in content
     assert ".github/verify_deployment.py" in content
 
 
