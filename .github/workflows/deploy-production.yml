@@ -78,7 +78,7 @@ jobs:
 
     environment:
       name: production
-      url: ${{ vars.PRODUCTION_SERVICE_URL || 'https://quizbotpro.onrender.com' }}
+      url: ${{ vars.PRODUCTION_SERVICE_URL || 'https://quiz-bot-lctq.onrender.com' }}
 
     concurrency:
       group: production-deployment
@@ -120,8 +120,9 @@ jobs:
       - name: Verify Production Health and Deployed Commit SHA
         env:
           TARGET_SHA: ${{ github.sha }}
-          HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL || 'https://quizbotpro.onrender.com/health' }}
+          HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL || 'https://quiz-bot-lctq.onrender.com/ready' }}
           TIMEOUT_SECONDS: "360"
           POLL_INTERVAL: "10"
+          EXPECTED_ENVIRONMENT: "production"
         run: |
-          python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL"
+          python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL" "$EXPECTED_ENVIRONMENT"

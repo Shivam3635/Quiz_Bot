@@ -18,7 +18,9 @@ from app.database.database import DatabaseIdentityMismatchError, cli_main
 
 
 def _get_workflow_content() -> str:
-    workflow_path = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "deploy-production.yml"
+    workflow_path = (
+        Path(__file__).resolve().parent.parent / ".github" / "workflows" / "deploy-production.yml"
+    )
     assert workflow_path.is_file(), "deploy-production.yml must exist in .github/workflows/"
     return workflow_path.read_text(encoding="utf-8")
 
@@ -41,12 +43,16 @@ def test_production_workflow_triggers_and_branch_isolation():
     assert "push:" in content
     assert "branches:" in content
     assert re.search(r"branches:\s*-\s*main", content), "Must trigger on push to main"
-    assert "workflow_dispatch:" not in content, "Production workflow must not allow manual workflow_dispatch"
+    assert (
+        "workflow_dispatch:" not in content
+    ), "Production workflow must not allow manual workflow_dispatch"
 
     # Must NOT list develop in push branches
     push_section = re.search(r"push:.*?(?=permissions:|\n\w+:)", content, re.DOTALL)
     assert push_section, "Must find push trigger section"
-    assert "develop" not in push_section.group(0), "deploy-production.yml must never trigger on develop"
+    assert "develop" not in push_section.group(
+        0
+    ), "deploy-production.yml must never trigger on develop"
 
     # Least privilege permissions
     assert re.search(r"permissions:\s*contents:\s*read", content), "Must declare contents: read"
@@ -57,14 +63,22 @@ def test_production_deployment_job_security_and_gates():
     content = _get_workflow_content()
 
     # deploy-production must require production-ci
-    assert re.search(r"needs:\s*production-ci", content), "deploy-production must depend on production-ci"
+    assert re.search(
+        r"needs:\s*production-ci", content
+    ), "deploy-production must depend on production-ci"
 
     # Must target protected 'production' environment
-    assert re.search(r"environment:\s*\n\s*name:\s*production", content), "Must target environment: production"
+    assert re.search(
+        r"environment:\s*\n\s*name:\s*production", content
+    ), "Must target environment: production"
 
     # Concurrency group with cancel-in-progress: false
-    assert re.search(r"group:\s*production-deployment", content), "Must use production-deployment concurrency group"
-    assert re.search(r"cancel-in-progress:\s*false", content), "Must enforce cancel-in-progress: false"
+    assert re.search(
+        r"group:\s*production-deployment", content
+    ), "Must use production-deployment concurrency group"
+    assert re.search(
+        r"cancel-in-progress:\s*false", content
+    ), "Must enforce cancel-in-progress: false"
 
     # Verify steps contain exact-SHA parameter and deployment verification
     assert "Trigger Render Production Deployment" in content
@@ -73,6 +87,14 @@ def test_production_deployment_job_security_and_gates():
     assert "TARGET_SHA: ${{ github.sha }}" in content
     assert "TARGET_SHA" in content
     assert ".github/verify_deployment.py" in content
+
+
+def test_production_workflow_fallback_urls():
+    """Ensure production workflow uses actual production service URL fallback https://quiz-bot-lctq.onrender.com."""
+    content = _get_workflow_content()
+    assert "https://quiz-bot-lctq.onrender.com" in content
+    assert "https://quizbotpro.onrender.com" not in content
+    assert "https://quiz-bot-lctq.onrender.com/ready" in content
 
 
 def test_database_cli_verify_only_success(monkeypatch):
@@ -110,7 +132,10 @@ def test_database_cli_init_success(monkeypatch):
 def test_database_cli_identity_mismatch_fails_closed(monkeypatch):
     """Verify database cli_main fails closed with exit code 1 on identity mismatch."""
     monkeypatch.setattr(sys, "argv", ["database.py", "--verify-only"])
-    with patch("app.database.database.verify_database_identity", side_effect=DatabaseIdentityMismatchError("Host mismatch")):
+    with patch(
+        "app.database.database.verify_database_identity",
+        side_effect=DatabaseIdentityMismatchError("Host mismatch"),
+    ):
         with pytest.raises(SystemExit) as exc:
             cli_main()
         assert exc.value.code == 1
@@ -126,7 +151,9 @@ def test_operational_documentation_files_exist():
     ]
     for doc in docs:
         assert doc.is_file(), f"Expected documentation file {doc.name} must exist"
-        assert doc.stat().st_size > 500, f"Documentation file {doc.name} must contain meaningful content"
+        assert (
+            doc.stat().st_size > 500
+        ), f"Documentation file {doc.name} must contain meaningful content"
 
 
 def test_database_schema_evolution_documentation_and_limitations():

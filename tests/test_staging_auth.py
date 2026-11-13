@@ -67,6 +67,7 @@ def make_mock_update(
 # 1. Configuration & Setting Validation Tests
 # ============================================================================
 
+
 def test_comma_separated_telegram_ids_parse_correctly():
     """Verify numeric strings, whitespace, and JSON list parsing in STAGING_ALLOWED_USER_IDS."""
     s1 = Settings(STAGING_ALLOWED_USER_IDS="111, 222, 333")
@@ -113,11 +114,16 @@ def test_env_loading_empty_staging_allowlist_rejected(monkeypatch):
     """Verify empty allowlist in environment fails closed when ENVIRONMENT is staging."""
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:valid_token_for_staging")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@ep-staging.region.neon.tech/neondb?sslmode=verify-full&sslrootcert=system")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://user:pass@ep-staging.region.neon.tech/neondb?sslmode=verify-full&sslrootcert=system",
+    )
     monkeypatch.setenv("STAGING_ALLOWED_USER_IDS", "")
     with pytest.raises(ValidationError) as exc:
         Settings()
-    assert "STAGING_ALLOWED_USER_IDS must contain at least one valid Telegram user ID" in str(exc.value)
+    assert "STAGING_ALLOWED_USER_IDS must contain at least one valid Telegram user ID" in str(
+        exc.value
+    )
 
 
 def test_empty_staging_allowlist_causes_validation_failure():
@@ -129,7 +135,9 @@ def test_empty_staging_allowlist_causes_validation_failure():
             DATABASE_URL="postgresql://user:pass@ep-staging.region.neon.tech/neondb?sslmode=verify-full&sslrootcert=system",
             STAGING_ALLOWED_USER_IDS="",
         )
-    assert "STAGING_ALLOWED_USER_IDS must contain at least one valid Telegram user ID" in str(exc_info.value)
+    assert "STAGING_ALLOWED_USER_IDS must contain at least one valid Telegram user ID" in str(
+        exc_info.value
+    )
 
     with pytest.raises(ValidationError) as exc_info2:
         Settings(
@@ -138,7 +146,9 @@ def test_empty_staging_allowlist_causes_validation_failure():
             DATABASE_URL="postgresql://user:pass@ep-staging.region.neon.tech/neondb?sslmode=verify-full&sslrootcert=system",
             STAGING_ALLOWED_USER_IDS=[],
         )
-    assert "STAGING_ALLOWED_USER_IDS must contain at least one valid Telegram user ID" in str(exc_info2.value)
+    assert "STAGING_ALLOWED_USER_IDS must contain at least one valid Telegram user ID" in str(
+        exc_info2.value
+    )
 
 
 def test_invalid_telegram_ids_cause_validation_failure():
@@ -224,6 +234,7 @@ def test_expected_database_identity_config_field():
 # ============================================================================
 # 2. Gatekeeper Authorization Tests
 # ============================================================================
+
 
 @pytest.mark.asyncio
 async def test_staging_allows_authorized_telegram_user():
@@ -396,6 +407,7 @@ async def test_staging_unhandled_or_non_user_update_fails_closed():
 # 3. Environment Compatibility Tests (Non-Staging Pass-Through)
 # ============================================================================
 
+
 @pytest.mark.asyncio
 async def test_production_mode_passes_updates_through_unchanged():
     """In production mode, any user update must pass through gatekeeper without interruption."""
@@ -501,23 +513,76 @@ def test_staging_aborts_startup_on_generic_database_init_failure():
         STAGING_ALLOWED_USER_IDS="111",
         EXPECTED_DATABASE_IDENTITY="ep-staging.region.neon.tech",
     )
-    with patch("app.main.get_settings", return_value=mock_settings), \
-         patch("app.main.init_db", side_effect=RuntimeError("Table creation DDL error")):
+    with (
+        patch("app.main.get_settings", return_value=mock_settings),
+        patch("app.main.init_db", side_effect=RuntimeError("Table creation DDL error")),
+    ):
         with pytest.raises(RuntimeError) as exc:
             create_bot_app()
-        assert "Staging startup aborted: database initialization failed" in str(exc.value)
+        assert "Startup aborted: database initialization failed" in str(exc.value)
+        assert isinstance(exc.value.__cause__, RuntimeError)
 
 
-def test_production_logs_warning_and_continues_on_database_init_failure():
-    """In production, database init failure logs a warning and allows bot creation to proceed (preserving existing behavior)."""
+def test_production_aborts_startup_on_generic_database_init_failure():
+    """In production, generic database initialization failure must raise and abort create_bot_app()."""
     prod_settings = Settings(
         _env_file=None,
         ENVIRONMENT="production",
         TELEGRAM_BOT_TOKEN="123456:prod_token",
         DATABASE_URL="postgresql://user:pass@ep-prod-999.neon.tech/neondb",
     )
-    with patch("app.main.get_settings", return_value=prod_settings), \
-         patch("app.main.init_db", side_effect=RuntimeError("Transient DB connection warning")):
-        app = create_bot_app()
-        assert app is not None
+    with (
+        patch("app.main.get_settings", return_value=prod_settings),
+        patch("app.main.init_db", side_effect=RuntimeError("Connection timeout to Neon cluster")),
+    ):
+        with pytest.raises(RuntimeError) as exc:
+            create_bot_app()
+        assert "Startup aborted: database initialization failed" in str(exc.value)
+        assert isinstance(exc.value.__cause__, RuntimeError)
 
+
+def test_production_aborts_startup_on_database_operational_error():
+    """In production, database OperationalError (e.g. auth or network failure) must fail closed."""
+    from sqlalchemy.exc import OperationalError
+
+    prod_settings = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        TELEGRAM_BOT_TOKEN="123456:prod_token",
+        DATABASE_URL="postgresql://user:pass@ep-prod-999.neon.tech/neondb",
+    )
+    db_err = OperationalError(
+        "connection to server failed", params=None, orig=Exception("password authentication failed")
+    )
+    with (
+        patch("app.main.get_settings", return_value=prod_settings),
+        patch("app.main.init_db", side_effect=db_err),
+    ):
+        with pytest.raises(RuntimeError) as exc:
+            create_bot_app()
+        assert "Startup aborted: database initialization failed" in str(exc.value)
+        assert exc.value.__cause__ is db_err
+
+
+def test_production_aborts_startup_on_database_schema_creation_failure():
+    """In production, DDL or schema creation failure during init_db must fail closed and prevent app build."""
+    from sqlalchemy.exc import ProgrammingError
+
+    prod_settings = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        TELEGRAM_BOT_TOKEN="123456:prod_token",
+        DATABASE_URL="postgresql://user:pass@ep-prod-999.neon.tech/neondb",
+    )
+    ddl_err = ProgrammingError(
+        "CREATE TABLE failed", params=None, orig=Exception("permission denied for schema public")
+    )
+    with (
+        patch("app.main.get_settings", return_value=prod_settings),
+        patch("app.main.init_db", side_effect=ddl_err),
+        patch("app.main.Application.builder") as mock_builder,
+    ):
+        with pytest.raises(RuntimeError) as exc:
+            create_bot_app()
+        assert "Startup aborted: database initialization failed" in str(exc.value)
+        mock_builder.assert_not_called()

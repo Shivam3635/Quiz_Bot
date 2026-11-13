@@ -124,8 +124,9 @@ jobs:
       - name: Verify Staging Health and Deployed Commit SHA
         env:
           TARGET_SHA: ${{ github.sha }}
-          HEALTH_URL: "https://quizbotpro-staging.onrender.com/health"
+          HEALTH_URL: "https://quizbotpro-staging.onrender.com/ready"
           TIMEOUT_SECONDS: "300"
           POLL_INTERVAL: "10"
+          EXPECTED_ENVIRONMENT: "staging"
         run: |
-          python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL"
+          python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL" "$EXPECTED_ENVIRONMENT"
