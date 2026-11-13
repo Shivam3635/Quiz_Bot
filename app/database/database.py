@@ -511,3 +511,79 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def cli_main() -> None:
+    """CLI entrypoint for database verification and schema management."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="QuizBotPro Database Operations & Verification Utility")
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Verify database connectivity and host identity without running DDL",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Inspect connected database identity and list existing tables",
+    )
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Execute init_db() to create missing tables on verified connection",
+    )
+
+    args = parser.parse_args()
+    current_settings = get_settings()
+
+    print("=" * 60)
+    print(f"QuizBotPro Database Utility [Environment: {current_settings.ENVIRONMENT}]")
+    print("=" * 60)
+
+    try:
+        with engine.begin() as conn:
+            print("Step 1: Verifying database identity and TLS configuration...")
+            verify_database_identity(
+                conn=conn,
+                target_engine=engine,
+                app_settings=current_settings,
+            )
+            print(" [PASS] Database identity and TLS verification succeeded.")
+
+            if args.verify_only:
+                print("\nVerification complete. Database is healthy and verified.")
+                sys.exit(0)
+
+            from sqlalchemy import inspect
+            inspector = inspect(conn)
+            existing_tables = sorted(inspector.get_table_names())
+            print(f"\nStep 2: Table inspection - {len(existing_tables)} existing tables:")
+            for tbl in existing_tables:
+                print(f"  - {tbl}")
+
+            if args.status:
+                print("\nStatus check complete.")
+                sys.exit(0)
+
+            if args.init:
+                print("\nStep 3: Creating missing tables (Base.metadata.create_all)...")
+                Base.metadata.create_all(bind=conn)
+                print(" [PASS] Missing tables created successfully.")
+                sys.exit(0)
+
+        print("\nNo action specified. Use --verify-only, --status, or --init.")
+    except DatabaseIdentityMismatchError as exc:
+        print(f"\n[FAIL] CRITICAL: Database identity mismatch: {exc}")
+        sys.exit(1)
+    except DatabaseIdentityError as exc:
+        print(f"\n[FAIL] Database identity/isolation failure: {exc}")
+        sys.exit(1)
+    except Exception as exc:  # noqa: BLE001
+        print(f"\n[FAIL] Unexpected error connecting to database: {exc}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    cli_main()

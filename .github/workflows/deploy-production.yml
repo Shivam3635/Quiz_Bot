@@ -1,0 +1,135 @@
+name: Production Release & Exact-SHA Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_reason:
+        description: "Reason or changelog summary for manual release trigger"
+        required: false
+        default: "Production release execution"
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  production-ci:
+    name: Production Pre-Release Quality Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ci-production-${{ github.ref }}
+      cancel-in-progress: true
+
+    env:
+      ENVIRONMENT: testing
+      TELEGRAM_BOT_TOKEN: "123456:mock_token_for_ci_testing_only"
+      DATABASE_URL: "sqlite:///:memory:"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Verify and install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Package & dependency integrity validation
+        run: |
+          pip check
+
+      - name: Security guard (verify no .env file exists)
+        run: |
+          if [ -f .env ]; then
+            echo "ERROR: Security violation! A .env file was detected in the workspace root."
+            echo "CI test runs must never contain or load real .env credential files."
+            exit 1
+          fi
+          echo "Security check passed: No .env file present in workspace root."
+
+      - name: Run Ruff Linting
+        run: |
+          ruff check .
+        continue-on-error: true
+
+      - name: Run Black Code Formatting Validation
+        run: |
+          black --check .
+        continue-on-error: true
+
+      - name: Run Dependency Vulnerability Audit (pip-audit)
+        run: |
+          pip-audit --desc || true
+
+      - name: Run Complete Authoritative Test Suite (pytest)
+        run: |
+          pytest -v --tb=short
+
+  deploy-production:
+    name: Production Deployment & Health Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: production-ci
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_SERVICE_URL || 'https://quizbotpro.onrender.com' }}
+
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Trigger Render Production Deployment
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.RENDER_PRODUCTION_DEPLOY_HOOK }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::error::Secret RENDER_PRODUCTION_DEPLOY_HOOK is not configured in repository or environment secrets."
+            echo "Production deployment cannot proceed without RENDER_PRODUCTION_DEPLOY_HOOK."
+            echo "Please set RENDER_PRODUCTION_DEPLOY_HOOK in GitHub Repository Settings -> Secrets and variables -> Actions (or Environment: production)."
+            exit 1
+          fi
+
+          echo "Triggering Render PRODUCTION deployment for verified commit: ${TARGET_SHA}"
+
+          if [[ "$DEPLOY_HOOK_URL" == *"?"* ]]; then
+            TRIGGER_URL="${DEPLOY_HOOK_URL}&ref=${TARGET_SHA}"
+          else
+            TRIGGER_URL="${DEPLOY_HOOK_URL}?ref=${TARGET_SHA}"
+          fi
+
+          curl -fsS -X POST "$TRIGGER_URL"
+          echo ""
+          echo "Production deploy hook successfully triggered."
+
+      - name: Verify Production Health and Deployed Commit SHA
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL || 'https://quizbotpro.onrender.com/health' }}
+          TIMEOUT_SECONDS: "360"
+          POLL_INTERVAL: "10"
+        run: |
+          python .github/verify_deployment.py "$TARGET_SHA" "$HEALTH_URL" "$TIMEOUT_SECONDS" "$POLL_INTERVAL"
+
