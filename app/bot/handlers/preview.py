@@ -10,21 +10,20 @@ from app.bot.keyboards.preview import (
     get_preview_keyboard,
 )
 from app.bot.states import QuizCreationState
-from app.parser.models import QuizQuestion, QuizSettings
-from app.parser.parser import QuizBotProParser
-from app.parser.validator import (
-    QuizValidator,
-    TELEGRAM_MAX_EXPLANATION_LENGTH,
-    TELEGRAM_MAX_EXTENDED_OPTION_LENGTH,
-    TELEGRAM_MAX_OPTION_LENGTH,
-    TELEGRAM_MAX_QUESTION_LENGTH,
-    telegram_utf16_length,
-)
 from app.database.database import SessionLocal
 from app.database.repositories import (
     get_quiz_set_by_id,
     reconstruct_quiz_data,
     update_quiz_set_questions,
+)
+from app.parser.models import QuizQuestion, QuizSettings
+from app.parser.parser import QuizBotProParser
+from app.parser.validator import (
+    TELEGRAM_MAX_EXPLANATION_LENGTH,
+    TELEGRAM_MAX_EXTENDED_OPTION_LENGTH,
+    TELEGRAM_MAX_QUESTION_LENGTH,
+    QuizValidator,
+    telegram_utf16_length,
 )
 from app.utils.logger import setup_logger
 
@@ -48,7 +47,9 @@ def format_question_preview(q: QuizQuestion, index: int, total: int, settings: Q
             lines.append(f"• <i>{err.message}</i>")
         lines.append("")
     elif any(telegram_utf16_length(opt.strip()) > 100 for opt in q.options):
-        lines.append("💡 <i>Extended Format: Full question & options will be posted with Option A/B/C/D buttons below.</i>\n")
+        lines.append(
+            "💡 <i>Extended Format: Full question & options will be posted with Option A/B/C/D buttons below.</i>\n"
+        )
 
     lines.append(f"❓ <b>{q.display_question}</b>\n")
 
@@ -218,7 +219,9 @@ async def set_correct_answer_callback(update: Update, context: ContextTypes.DEFA
     return await edit_current_question_callback(update, context)
 
 
-async def prompt_edit_question_text_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def prompt_edit_question_text_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Prompt user to edit question text with copyable snippet."""
     query = update.callback_query
     if query:
@@ -291,7 +294,9 @@ async def prompt_edit_option_callback(update: Update, context: ContextTypes.DEFA
     return QuizCreationState.EDITING_QUESTION
 
 
-async def prompt_edit_explanation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def prompt_edit_explanation_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Prompt user to type new explanation."""
     query = update.callback_query
     if query:
@@ -321,7 +326,9 @@ async def prompt_edit_explanation_callback(update: Update, context: ContextTypes
     return QuizCreationState.EDITING_QUESTION
 
 
-async def show_copyable_question_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def show_copyable_question_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Display the entire question in <code> tags for 1-tap clipboard copying."""
     query = update.callback_query
     if query:
@@ -355,7 +362,9 @@ async def show_copyable_question_callback(update: Update, context: ContextTypes.
     return QuizCreationState.EDITING_QUESTION
 
 
-async def delete_question_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def delete_question_prompt_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Ask confirmation before deleting question."""
     query = update.callback_query
     if query:
@@ -370,7 +379,7 @@ async def delete_question_prompt_callback(update: Update, context: ContextTypes.
         snippet = disp_q[:60] + "..." if len(disp_q) > 60 else disp_q
         await query.edit_message_text(
             f"🗑️ <b>Delete Question {current_index + 1}?</b>\n\n"
-            f"<i>\"{snippet}\"</i>\n\n"
+            f'<i>"{snippet}"</i>\n\n'
             "Are you sure you want to remove this question from the batch?",
             reply_markup=get_delete_confirm_keyboard(current_index),
             parse_mode=ParseMode.HTML,
@@ -379,7 +388,9 @@ async def delete_question_prompt_callback(update: Update, context: ContextTypes.
     return QuizCreationState.PREVIEWING
 
 
-async def confirm_delete_question_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def confirm_delete_question_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Delete the selected question from the batch."""
     query = update.callback_query
     if query:
@@ -404,6 +415,7 @@ async def confirm_delete_question_callback(update: Update, context: ContextTypes
     if not questions:
         if query and query.message:
             from app.bot.keyboards.main import get_main_menu_keyboard
+
             await query.edit_message_text(
                 "🗑️ <b>All questions in this batch have been deleted.</b>\n\n"
                 "You can start a new batch from the main menu:",
@@ -416,6 +428,34 @@ async def confirm_delete_question_callback(update: Update, context: ContextTypes
     context.user_data["preview_index"] = new_index
 
     return await preview_callback(update, context)
+
+
+async def _send_edit_success_feedback(
+    message,
+    item_label: str,
+    current_index: int,
+    questions: list[QuizQuestion],
+    has_single_errs: bool,
+) -> None:
+    """Send informative feedback after in-place edit, indicating if all questions are now valid."""
+    if has_single_errs:
+        await message.reply_text(f"✅ <b>{item_label} updated!</b>", parse_mode=ParseMode.HTML)
+        return
+
+    val_batch = validator.validate_batch(questions)
+    if val_batch.is_valid:
+        await message.reply_text(
+            f"✅ <b>{item_label} updated! All questions are now valid.</b>\n\n"
+            "Tap <b>✅ Done / Save Quiz</b> below to finish creating your quiz, or preview/configure settings:",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        remaining_count = len(val_batch.failed_question_indices)
+        await message.reply_text(
+            f"✅ <b>{item_label} updated! Question {current_index + 1} has no remaining issues.</b>\n"
+            f"⚠️ <i>{remaining_count} question(s) still need attention.</i>",
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def receive_question_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -443,16 +483,17 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
             return QuizCreationState.EDITING_QUESTION
 
         from app.utils.helpers import format_bilingual_question_text
+
         q.question = format_bilingual_question_text(text)
         context.user_data.pop("edit_mode", None)
         rem_errs = validator.validate_single(q, current_index + 1)
-        if not rem_errs:
-            await update.message.reply_text(
-                f"✅ <b>Question text updated! Question {current_index + 1} has no remaining issues.</b>",
-                parse_mode=ParseMode.HTML,
-            )
-        else:
-            await update.message.reply_text("✅ <b>Question text updated!</b>", parse_mode=ParseMode.HTML)
+        await _send_edit_success_feedback(
+            update.message,
+            f"Question text (Q{current_index + 1})",
+            current_index,
+            questions,
+            bool(rem_errs),
+        )
 
         # Single source of truth: sync directly to DB if quiz is persisted
         saved_id = context.user_data.get("saved_quiz_set_id")
@@ -484,13 +525,13 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
             letter = chr(ord("A") + opt_idx)
             context.user_data.pop("edit_mode", None)
             rem_errs = validator.validate_single(q, current_index + 1)
-            if not rem_errs:
-                await update.message.reply_text(
-                    f"✅ <b>Option {letter} updated! Question {current_index + 1} has no remaining issues.</b>",
-                    parse_mode=ParseMode.HTML,
-                )
-            else:
-                await update.message.reply_text(f"✅ <b>Option {letter} updated!</b>", parse_mode=ParseMode.HTML)
+            await _send_edit_success_feedback(
+                update.message,
+                f"Option {letter} (Q{current_index + 1})",
+                current_index,
+                questions,
+                bool(rem_errs),
+            )
 
             # Single source of truth: sync directly to DB if quiz is persisted
             saved_id = context.user_data.get("saved_quiz_set_id")
@@ -507,7 +548,9 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
     elif edit_mode == "explanation":
         if text.lower() in ("none", "remove", "clear", "-"):
             q.explanation = None
-            await update.message.reply_text("✅ <b>Explanation removed!</b>", parse_mode=ParseMode.HTML)
+            await update.message.reply_text(
+                "✅ <b>Explanation removed!</b>", parse_mode=ParseMode.HTML
+            )
         else:
             expl_len = telegram_utf16_length(text)
             if expl_len > TELEGRAM_MAX_EXPLANATION_LENGTH:
@@ -517,13 +560,13 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
                 return QuizCreationState.EDITING_QUESTION
             q.explanation = text
             rem_errs = validator.validate_single(q, current_index + 1)
-            if not rem_errs:
-                await update.message.reply_text(
-                    f"✅ <b>Explanation updated! Question {current_index + 1} has no remaining issues.</b>",
-                    parse_mode=ParseMode.HTML,
-                )
-            else:
-                await update.message.reply_text("✅ <b>Explanation updated!</b>", parse_mode=ParseMode.HTML)
+            await _send_edit_success_feedback(
+                update.message,
+                f"Explanation (Q{current_index + 1})",
+                current_index,
+                questions,
+                bool(rem_errs),
+            )
 
         context.user_data.pop("edit_mode", None)
 
@@ -554,13 +597,13 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
                 logger.error("DB sync failed on replacement question paste: %s", e)
 
         rem_errs = validator.validate_single(questions[current_index], current_index + 1)
-        if not rem_errs:
-            await update.message.reply_text(
-                f"✅ <b>Question {current_index + 1} replaced successfully! All issues resolved.</b>",
-                parse_mode=ParseMode.HTML,
-            )
-        else:
-            await update.message.reply_text("✅ <b>Question replaced successfully!</b>", parse_mode=ParseMode.HTML)
+        await _send_edit_success_feedback(
+            update.message,
+            f"Question {current_index + 1}",
+            current_index,
+            questions,
+            bool(rem_errs),
+        )
         return await preview_callback(update, context)
 
     return await preview_callback(update, context)
@@ -601,7 +644,9 @@ async def fix_invalid_question_callback(update: Update, context: ContextTypes.DE
     return await edit_current_question_callback(update, context)
 
 
-async def drop_invalid_questions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def drop_invalid_questions_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Drop questions that have validation errors and continue with the valid ones."""
     query = update.callback_query
     if query:
@@ -640,6 +685,11 @@ async def drop_invalid_questions_callback(update: Update, context: ContextTypes.
     action_keyboard = InlineKeyboardMarkup(
         [
             [
+                InlineKeyboardButton(
+                    "✅ Done / Save Quiz", callback_data="finish_creation_settings"
+                ),
+            ],
+            [
                 InlineKeyboardButton("⚙️ Configure Settings", callback_data="goto_settings"),
                 InlineKeyboardButton("👀 Preview Quizzes", callback_data="goto_preview"),
             ],
@@ -653,7 +703,9 @@ async def drop_invalid_questions_callback(update: Update, context: ContextTypes.
     )
 
     if query and query.message:
-        await query.edit_message_text(success_text, reply_markup=action_keyboard, parse_mode=ParseMode.HTML)
+        await query.edit_message_text(
+            success_text, reply_markup=action_keyboard, parse_mode=ParseMode.HTML
+        )
 
     return QuizCreationState.CONFIGURING_SETTINGS
 
@@ -684,7 +736,14 @@ async def edit_saved_question_callback(update: Update, context: ContextTypes.DEF
                 await query.edit_message_text(
                     "⚠️ Quiz questions could not be loaded.",
                     reply_markup=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton("🔙 Back to Quiz Details", callback_data=f"view_quiz_{quiz_set_id}")]]
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    "🔙 Back to Quiz Details",
+                                    callback_data=f"view_quiz_{quiz_set_id}",
+                                )
+                            ]
+                        ]
                     ),
                 )
             return ConversationHandler.END
@@ -697,4 +756,3 @@ async def edit_saved_question_callback(update: Update, context: ContextTypes.DEF
     context.user_data["preview_index"] = max(0, min(idx, len(questions) - 1))
 
     return await edit_current_question_callback(update, context)
-

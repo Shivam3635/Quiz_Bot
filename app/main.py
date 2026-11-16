@@ -289,6 +289,9 @@ def create_bot_app() -> Application:
             QuizCreationState.WAITING_FOR_BULK_INPUT: [
                 CommandHandler("done", multipart_done_callback),
                 CallbackQueryHandler(multipart_done_callback, pattern="^multipart_done$"),
+                CallbackQueryHandler(
+                    finish_creation_settings_callback, pattern="^finish_creation_settings$"
+                ),
                 CallbackQueryHandler(continue_session_callback, pattern="^multipart_continue$"),
                 CallbackQueryHandler(discard_and_restart_callback, pattern="^multipart_discard$"),
                 CallbackQueryHandler(drop_broken_question_callback, pattern="^drop_broken_q_\\d+$"),
@@ -329,6 +332,10 @@ def create_bot_app() -> Application:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_channel_dest_message),
             ],
             QuizCreationState.PREVIEWING: [
+                CommandHandler("done", finish_creation_settings_callback),
+                CallbackQueryHandler(
+                    finish_creation_settings_callback, pattern="^finish_creation_settings$"
+                ),
                 CallbackQueryHandler(preview_callback, pattern="^preview_nav_\\d+$"),
                 CallbackQueryHandler(preview_noop_callback, pattern="^preview_noop$"),
                 CallbackQueryHandler(jump_next_invalid_callback, pattern="^jump_next_invalid$"),
@@ -354,6 +361,10 @@ def create_bot_app() -> Application:
                 CallbackQueryHandler(view_quiz_callback, pattern="^view_quiz_\\d+$"),
             ],
             QuizCreationState.EDITING_QUESTION: [
+                CommandHandler("done", finish_creation_settings_callback),
+                CallbackQueryHandler(
+                    finish_creation_settings_callback, pattern="^finish_creation_settings$"
+                ),
                 CallbackQueryHandler(set_correct_answer_callback, pattern="^set_correct_ans_\\d+$"),
                 CallbackQueryHandler(prompt_edit_question_text_callback, pattern="^edit_q_text$"),
                 CallbackQueryHandler(prompt_edit_option_callback, pattern="^edit_opt_\\d+$"),
