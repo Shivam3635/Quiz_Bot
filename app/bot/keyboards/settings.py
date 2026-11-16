@@ -5,7 +5,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.parser.models import QuizSettings
 
 
-def get_settings_keyboard(settings: QuizSettings) -> InlineKeyboardMarkup:
+def get_settings_keyboard(
+    settings: QuizSettings,
+    quiz_set_id: int | None = None,
+    is_valid: bool = True,
+) -> InlineKeyboardMarkup:
     """Generate dynamic inline keyboard reflecting current settings."""
     anon_status = "ON ✅" if settings.is_anonymous else "OFF ❌"
     shuffle_status = "ON ✅" if settings.shuffle_options else "OFF ❌"
@@ -27,6 +31,15 @@ def get_settings_keyboard(settings: QuizSettings) -> InlineKeyboardMarkup:
         settings.description[:18] + "..."
         if settings.description and len(settings.description) > 18
         else (settings.description or "None (Tap to set)")
+    )
+
+    bottom_btn = (
+        InlineKeyboardButton(
+            "✅ Done / Back to Quiz",
+            callback_data=f"view_quiz_{quiz_set_id}" if quiz_set_id else "finish_creation_settings",
+        )
+        if is_valid
+        else InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")
     )
 
     keyboard = [
@@ -59,14 +72,11 @@ def get_settings_keyboard(settings: QuizSettings) -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"📢 Target: {dest_status}", callback_data="set_channel_dest"),
         ],
         [
-            InlineKeyboardButton("✅ Done / Save Quiz", callback_data="finish_creation_settings"),
-        ],
-        [
             InlineKeyboardButton("👀 Preview Quizzes", callback_data="goto_preview"),
             InlineKeyboardButton("🚀 Publish Directly", callback_data="goto_confirm_publish"),
         ],
         [
-            InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
+            bottom_btn,
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -118,7 +128,9 @@ def get_quiz_settings_config_keyboard(
     done_btn = (
         InlineKeyboardButton("✅ Done / Back to Quiz", callback_data=f"view_quiz_{quiz_set_id}")
         if quiz_set_id is not None
-        else InlineKeyboardButton("✅ Save & Finish", callback_data="finish_creation_settings")
+        else InlineKeyboardButton(
+            "✅ Done / Back to Quiz", callback_data="finish_creation_settings"
+        )
     )
 
     return InlineKeyboardMarkup(

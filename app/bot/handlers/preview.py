@@ -1,5 +1,6 @@
 """Paginated preview and interactive question editing handlers."""
 
+from sqlalchemy.exc import SQLAlchemyError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
@@ -12,8 +13,10 @@ from app.bot.keyboards.preview import (
 from app.bot.states import QuizCreationState
 from app.database.database import SessionLocal
 from app.database.repositories import (
+    get_or_create_user,
     get_quiz_set_by_id,
     reconstruct_quiz_data,
+    save_quiz_batch,
     update_quiz_set_questions,
 )
 from app.parser.models import QuizQuestion, QuizSettings
@@ -430,6 +433,44 @@ async def confirm_delete_question_callback(
     return await preview_callback(update, context)
 
 
+def _sync_or_persist_quiz(
+    context: ContextTypes.DEFAULT_TYPE, user, questions: list[QuizQuestion]
+) -> int | None:
+    """Ensure questions are persisted in DB if batch is valid, or synced if already persisted."""
+    saved_id = context.user_data.get("saved_quiz_set_id")
+    if saved_id:
+        try:
+            with SessionLocal() as db:
+                update_quiz_set_questions(db, saved_id, questions)
+        except SQLAlchemyError as e:
+            logger.error("DB sync failed on question edit: %s", e)
+        return saved_id
+
+    val_batch = validator.validate_batch(questions)
+    if val_batch.is_valid and questions:
+        try:
+            user_id = user.id if user else 0
+            settings = context.user_data.get("quiz_settings") or QuizSettings()
+            with SessionLocal() as db:
+                user_rec = get_or_create_user(
+                    db, telegram_id=user_id, username=user.username if user else None
+                )
+                quiz_set = save_quiz_batch(
+                    db=db,
+                    user_id=user_rec.id,
+                    title=settings.title,
+                    description=settings.description,
+                    questions=questions,
+                    settings=settings,
+                )
+                saved_id = quiz_set.id
+                context.user_data["saved_quiz_set_id"] = saved_id
+                logger.info("Auto-persisted quiz set %d upon in-app edit resolution", saved_id)
+        except SQLAlchemyError as e:
+            logger.error("Auto-persist on valid question edit failed: %s", e)
+    return saved_id
+
+
 async def _send_edit_success_feedback(
     message,
     item_label: str,
@@ -446,7 +487,7 @@ async def _send_edit_success_feedback(
     if val_batch.is_valid:
         await message.reply_text(
             f"✅ <b>{item_label} updated! All questions are now valid.</b>\n\n"
-            "Tap <b>✅ Done / Save Quiz</b> below to finish creating your quiz, or preview/configure settings:",
+            "Tap <b>✅ Done / Back to Quiz</b> below to view quiz details, or preview/configure settings:",
             parse_mode=ParseMode.HTML,
         )
     else:
@@ -495,14 +536,7 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
             bool(rem_errs),
         )
 
-        # Single source of truth: sync directly to DB if quiz is persisted
-        saved_id = context.user_data.get("saved_quiz_set_id")
-        if saved_id:
-            try:
-                with SessionLocal() as db:
-                    update_quiz_set_questions(db, saved_id, questions)
-            except Exception as e:
-                logger.error("DB sync failed on question text edit: %s", e)
+        _sync_or_persist_quiz(context, update.effective_user, questions)
 
         return await preview_callback(update, context)
 
@@ -533,14 +567,7 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
                 bool(rem_errs),
             )
 
-            # Single source of truth: sync directly to DB if quiz is persisted
-            saved_id = context.user_data.get("saved_quiz_set_id")
-            if saved_id:
-                try:
-                    with SessionLocal() as db:
-                        update_quiz_set_questions(db, saved_id, questions)
-                except Exception as e:
-                    logger.error("DB sync failed on option edit: %s", e)
+            _sync_or_persist_quiz(context, update.effective_user, questions)
 
         return await preview_callback(update, context)
 
@@ -570,14 +597,7 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
 
         context.user_data.pop("edit_mode", None)
 
-        # Single source of truth: sync directly to DB if quiz is persisted
-        saved_id = context.user_data.get("saved_quiz_set_id")
-        if saved_id:
-            try:
-                with SessionLocal() as db:
-                    update_quiz_set_questions(db, saved_id, questions)
-            except Exception as e:
-                logger.error("DB sync failed on option/explanation edit: %s", e)
+        _sync_or_persist_quiz(context, update.effective_user, questions)
 
         return await preview_callback(update, context)
 
@@ -588,13 +608,7 @@ async def receive_question_edit_message(update: Update, context: ContextTypes.DE
         context.user_data["bulk_questions"] = questions
         context.user_data.pop("edit_mode", None)
 
-        saved_id = context.user_data.get("saved_quiz_set_id")
-        if saved_id:
-            try:
-                with SessionLocal() as db:
-                    update_quiz_set_questions(db, saved_id, questions)
-            except Exception as e:
-                logger.error("DB sync failed on replacement question paste: %s", e)
+        _sync_or_persist_quiz(context, update.effective_user, questions)
 
         rem_errs = validator.validate_single(questions[current_index], current_index + 1)
         await _send_edit_success_feedback(
@@ -668,13 +682,7 @@ async def drop_invalid_questions_callback(
     context.user_data["bulk_questions"] = val_res.valid_questions
     context.user_data["preview_index"] = 0
 
-    saved_id = context.user_data.get("saved_quiz_set_id")
-    if saved_id:
-        try:
-            with SessionLocal() as db:
-                update_quiz_set_questions(db, saved_id, val_res.valid_questions)
-        except Exception as e:
-            logger.error("DB sync failed on drop invalid: %s", e)
+    saved_id = _sync_or_persist_quiz(context, update.effective_user, val_res.valid_questions)
 
     success_text = (
         f"🗑️ <b>Dropped {dropped_count} invalid question(s).</b>\n\n"
@@ -682,13 +690,9 @@ async def drop_invalid_questions_callback(
         "You can now configure settings, preview, or publish directly:"
     )
 
+    done_callback = f"view_quiz_{saved_id}" if saved_id else "finish_creation_settings"
     action_keyboard = InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    "✅ Done / Save Quiz", callback_data="finish_creation_settings"
-                ),
-            ],
             [
                 InlineKeyboardButton("⚙️ Configure Settings", callback_data="goto_settings"),
                 InlineKeyboardButton("👀 Preview Quizzes", callback_data="goto_preview"),
@@ -697,7 +701,7 @@ async def drop_invalid_questions_callback(
                 InlineKeyboardButton("🚀 Publish Directly", callback_data="goto_confirm_publish"),
             ],
             [
-                InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
+                InlineKeyboardButton("✅ Done / Back to Quiz", callback_data=done_callback),
             ],
         ]
     )

@@ -51,6 +51,19 @@ def get_preview_keyboard(
             ]
         )
 
+    bottom_btn = (
+        InlineKeyboardButton(
+            "✅ Done / Back to Quiz",
+            callback_data=(
+                f"view_quiz_{saved_quiz_set_id}"
+                if saved_quiz_set_id
+                else "finish_creation_settings"
+            ),
+        )
+        if not invalid_indices
+        else InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")
+    )
+
     if saved_quiz_set_id:
         keyboard.extend(
             [
@@ -69,25 +82,11 @@ def get_preview_keyboard(
                     ),
                 ],
                 [
-                    InlineKeyboardButton(
-                        "🔙 Back to Quiz Details", callback_data=f"view_quiz_{saved_quiz_set_id}"
-                    ),
+                    bottom_btn,
                 ],
             ]
         )
     else:
-        if not invalid_indices:
-            keyboard.append([
-                InlineKeyboardButton("✅ Done / Save Quiz", callback_data="finish_creation_settings"),
-            ])
-        if not invalid_indices:
-            keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        "✅ Done / Save Quiz", callback_data="finish_creation_settings"
-                    ),
-                ]
-            )
         keyboard.extend(
             [
                 [
@@ -101,7 +100,7 @@ def get_preview_keyboard(
                     InlineKeyboardButton("🚀 Publish All", callback_data="goto_confirm_publish"),
                 ],
                 [
-                    InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
+                    bottom_btn,
                 ],
             ]
         )

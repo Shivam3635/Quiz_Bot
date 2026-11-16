@@ -135,28 +135,31 @@ def test_edit_keyboard_shows_length_warnings():
 
 
 def test_preview_keyboard_shows_done_save_button_when_valid():
-    """Verify that draft preview keyboard displays 'Done / Save Quiz' when all questions are valid."""
+    """Verify that draft preview keyboard displays 'Done / Back to Quiz' at bottom when all questions are valid."""
     kb_clean = get_preview_keyboard(
         current_index=0, total_questions=5, invalid_indices=[], saved_quiz_set_id=None
     )
     flat_clean = [b.callback_data for row in kb_clean.inline_keyboard for b in row]
     assert "finish_creation_settings" in flat_clean
+    assert kb_clean.inline_keyboard[-1][0].text == "✅ Done / Back to Quiz"
 
     kb_invalid = get_preview_keyboard(
         current_index=0, total_questions=5, invalid_indices=[1], saved_quiz_set_id=None
     )
     flat_invalid = [b.callback_data for row in kb_invalid.inline_keyboard for b in row]
     assert "finish_creation_settings" not in flat_invalid
+    assert kb_invalid.inline_keyboard[-1][0].text == "❌ Cancel"
 
 
 def test_settings_keyboard_has_done_save_button():
-    """Verify settings keyboard includes 'Done / Save Quiz' option."""
+    """Verify settings keyboard includes 'Done / Back to Quiz' option at bottom when valid."""
     from app.bot.keyboards.settings import get_settings_keyboard
 
     settings = QuizSettings(title="Test Quiz")
     kb = get_settings_keyboard(settings)
     flat = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert "finish_creation_settings" in flat
+    assert kb.inline_keyboard[-1][0].text == "✅ Done / Back to Quiz"
 
 
 @pytest.mark.asyncio
@@ -330,20 +333,24 @@ async def test_e2e_edit_question_reveals_done_button_and_saves_quiz():
     assert msg_edit.reply_text.called
     feedback_text = msg_edit.reply_text.call_args_list[0][0][0]
     assert "All questions are now valid" in feedback_text
-    assert "Done / Save Quiz" in feedback_text
+    assert "Done / Back to Quiz" in feedback_text
 
-    # Check that keyboard in preview message contains "finish_creation_settings"
+    # Check that keyboard in preview message contains Done / Back to Quiz at the bottom
     preview_call = msg_edit.reply_text.call_args_list[1]
     preview_kb = preview_call[1]["reply_markup"]
+    saved_id = context.user_data.get("saved_quiz_set_id")
+    expected_cb = f"view_quiz_{saved_id}" if saved_id else "finish_creation_settings"
     flat_callbacks = [b.callback_data for row in preview_kb.inline_keyboard for b in row]
-    assert "finish_creation_settings" in flat_callbacks
+    assert expected_cb in flat_callbacks
+    assert preview_kb.inline_keyboard[-1][0].text == "✅ Done / Back to Quiz"
+    assert preview_kb.inline_keyboard[-1][0].callback_data == expected_cb
 
-    # Step 4: User clicks Done / Save Quiz (or sends /done)
+    # Step 4: User clicks Done / Back to Quiz (or sends /done)
     update_finish = MagicMock(spec=Update)
     update_finish.effective_user = user
     update_finish.effective_chat = MagicMock(id=chat_id)
     query_finish = MagicMock(spec=CallbackQuery)
-    query_finish.data = "finish_creation_settings"
+    query_finish.data = expected_cb
     query_finish.answer = AsyncMock()
     query_finish.message = MagicMock(spec=Message)
     query_finish.message.edit_message_text = AsyncMock()

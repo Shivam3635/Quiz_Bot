@@ -2,6 +2,7 @@ import html
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 from app.bot.keyboards.settings import get_quiz_settings_config_keyboard, get_settings_keyboard
@@ -61,6 +62,19 @@ def format_settings_text(settings: QuizSettings) -> str:
     )
 
 
+def _get_creation_settings_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, settings: QuizSettings
+) -> InlineKeyboardMarkup:
+    """Return settings keyboard with Done / Back to Quiz or Cancel depending on validity and persistence."""
+    saved_id = context.user_data.get("saved_quiz_set_id")
+    questions = context.user_data.get("bulk_questions") or []
+    from app.parser.validator import QuizValidator
+
+    val_res = QuizValidator().validate_batch(questions) if questions else None
+    is_valid = val_res.is_valid if val_res else True
+    return get_settings_keyboard(settings, quiz_set_id=saved_id, is_valid=is_valid)
+
+
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show the settings configuration screen."""
     query = update.callback_query
@@ -71,7 +85,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["quiz_settings"] = settings
 
     text = format_settings_text(settings)
-    keyboard = get_settings_keyboard(settings)
+    keyboard = _get_creation_settings_keyboard(context, settings)
 
     if query and query.message:
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
@@ -93,7 +107,7 @@ async def toggle_anonymous_callback(update: Update, context: ContextTypes.DEFAUL
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -111,7 +125,7 @@ async def toggle_shuffle_callback(update: Update, context: ContextTypes.DEFAULT_
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -129,7 +143,7 @@ async def toggle_explanation_callback(update: Update, context: ContextTypes.DEFA
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -155,7 +169,7 @@ async def cycle_timer_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if query.message:
             await query.edit_message_text(
                 format_settings_text(settings),
-                reply_markup=get_settings_keyboard(settings),
+                reply_markup=_get_creation_settings_keyboard(context, settings),
                 parse_mode=ParseMode.HTML,
             )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -173,7 +187,7 @@ async def toggle_header_banner_callback(update: Update, context: ContextTypes.DE
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -625,7 +639,10 @@ async def finish_creation_settings_callback(
     query = update.callback_query
     msg = update.message
     if query:
-        await query.answer("Settings saved!")
+        try:
+            await query.answer()
+        except TelegramError as err:
+            logger.debug("Query answer already acknowledged: %s", err)
 
     quiz_set_id = context.user_data.get("saved_quiz_set_id")
     settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
