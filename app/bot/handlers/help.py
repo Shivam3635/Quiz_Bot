@@ -14,13 +14,12 @@ HELP_MESSAGE = (
     "Create, manage, and host hundreds of native Telegram quiz polls in seconds!\n\n"
     "<b>⚡ 3-Step Quickstart:</b>\n"
     "1️⃣ Run /newquiz or tap <b>📦 Bulk Create</b>\n"
-    "2️⃣ Paste questions or upload files (Excel, Word, CSV, PDF)\n"
+    "2️⃣ Paste questions in direct text format\n"
     "3️⃣ Tap <b>✅ Done</b>, configure your timer/channel, and tap <b>Publish</b>!\n\n"
     "<b>📄 Supported Input Formats:</b>\n"
     "• <b>Direct Text:</b> Q1, options (A, B, C, D), and answers (marked with ✅ or <code>Answer: B</code>)\n"
-    "• <b>Spreadsheets:</b> Excel (<code>.xlsx</code>) and CSV (<code>.csv</code>)\n"
-    "• <b>Documents:</b> Word (<code>.docx</code>) and PDF (<code>.pdf</code>)\n"
-    "• <b>Bilingual:</b> English + Hindi questions automatically formatted cleanly\n\n"
+    "• <b>Bilingual:</b> English + Hindi questions automatically formatted cleanly\n"
+    "• <i>Note: Document & photo uploads are currently disabled for maintenance.</i>\n\n"
     "<b>🚀 Essential Commands:</b>\n"
     "• /newquiz — Create a new bulk quiz set\n"
     "• /myquizzes — View saved quizzes & 1-click re-publish\n"
@@ -36,8 +35,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Handle /help command or help callback button with clear, brief guidance."""
     help_keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("📖 Download Complete PDF Guide", callback_data="action_download_guide")],
-            [InlineKeyboardButton("📥 Sample Excel Template", callback_data="action_download_template")],
+            [
+                InlineKeyboardButton(
+                    "📖 Download Complete PDF Guide", callback_data="action_download_guide"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📥 Sample Excel Template", callback_data="action_download_template"
+                )
+            ],
             [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="action_main_menu")],
         ]
     )
@@ -63,7 +70,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 @require_group_admin
 async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send comprehensive official QuizBotPro PDF User Guide."""
-    chat_id = update.effective_chat.id if update.effective_chat else (update.effective_user.id if update.effective_user else None)
+    chat_id = (
+        update.effective_chat.id
+        if update.effective_chat
+        else (update.effective_user.id if update.effective_user else None)
+    )
     if not chat_id:
         return
 
@@ -114,7 +125,11 @@ async def guide_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 @require_group_admin
 async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send ready-to-use sample Excel spreadsheet template (.xlsx)."""
-    chat_id = update.effective_chat.id if update.effective_chat else (update.effective_user.id if update.effective_user else None)
+    chat_id = (
+        update.effective_chat.id
+        if update.effective_chat
+        else (update.effective_user.id if update.effective_user else None)
+    )
     if not chat_id:
         return
 
@@ -160,5 +175,3 @@ async def template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
         except Exception:
             pass
-
-

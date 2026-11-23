@@ -1,10 +1,15 @@
 """Keyboards for batch quiz settings configuration."""
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from app.parser.models import QuizSettings
 
 
-def get_settings_keyboard(settings: QuizSettings) -> InlineKeyboardMarkup:
+def get_settings_keyboard(
+    settings: QuizSettings,
+    quiz_set_id: int | None = None,
+    is_valid: bool = True,
+) -> InlineKeyboardMarkup:
     """Generate dynamic inline keyboard reflecting current settings."""
     anon_status = "ON ✅" if settings.is_anonymous else "OFF ❌"
     shuffle_status = "ON ✅" if settings.shuffle_options else "OFF ❌"
@@ -17,25 +22,50 @@ def get_settings_keyboard(settings: QuizSettings) -> InlineKeyboardMarkup:
         timer_status = "None (No Timer)"
 
     dest_status = settings.channel_id if settings.channel_id else "This Chat / Default"
-    title_display = settings.title[:18] + "..." if settings.title and len(settings.title) > 18 else (settings.title or "None (Tap to set)")
-    desc_display = settings.description[:18] + "..." if settings.description and len(settings.description) > 18 else (settings.description or "None (Tap to set)")
+    title_display = (
+        settings.title[:18] + "..."
+        if settings.title and len(settings.title) > 18
+        else (settings.title or "None (Tap to set)")
+    )
+    desc_display = (
+        settings.description[:18] + "..."
+        if settings.description and len(settings.description) > 18
+        else (settings.description or "None (Tap to set)")
+    )
+
+    bottom_btn = (
+        InlineKeyboardButton(
+            "✅ Done / Back to Quiz",
+            callback_data=f"view_quiz_{quiz_set_id}" if quiz_set_id else "finish_creation_settings",
+        )
+        if is_valid
+        else InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")
+    )
 
     keyboard = [
         [
-            InlineKeyboardButton(f"🏷️ Quiz Title: {title_display}", callback_data="prompt_set_title"),
+            InlineKeyboardButton(
+                f"🏷️ Quiz Title: {title_display}", callback_data="prompt_set_title"
+            ),
         ],
         [
-            InlineKeyboardButton(f"📝 Description: {desc_display}", callback_data="prompt_set_desc"),
+            InlineKeyboardButton(
+                f"📝 Description: {desc_display}", callback_data="prompt_set_desc"
+            ),
         ],
         [
-            InlineKeyboardButton(f"📌 Channel Header Banner: {banner_status}", callback_data="toggle_header_banner"),
+            InlineKeyboardButton(
+                f"📌 Channel Header Banner: {banner_status}", callback_data="toggle_header_banner"
+            ),
         ],
         [
             InlineKeyboardButton(f"🕶️ Anonymous: {anon_status}", callback_data="toggle_anonymous"),
             InlineKeyboardButton(f"🔀 Shuffle: {shuffle_status}", callback_data="toggle_shuffle"),
         ],
         [
-            InlineKeyboardButton(f"💡 Explanation: {expl_status}", callback_data="toggle_explanation"),
+            InlineKeyboardButton(
+                f"💡 Explanation: {expl_status}", callback_data="toggle_explanation"
+            ),
             InlineKeyboardButton(f"⏱️ Timer: {timer_status}", callback_data="cycle_timer"),
         ],
         [
@@ -46,7 +76,7 @@ def get_settings_keyboard(settings: QuizSettings) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🚀 Publish Directly", callback_data="goto_confirm_publish"),
         ],
         [
-            InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
+            bottom_btn,
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -72,12 +102,22 @@ def get_timer_select_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_quiz_settings_config_keyboard(settings: QuizSettings, quiz_set_id: int | None = None) -> InlineKeyboardMarkup:
+def get_quiz_settings_config_keyboard(
+    settings: QuizSettings, quiz_set_id: int | None = None
+) -> InlineKeyboardMarkup:
     """Generate dynamic inline keyboard for comprehensive settings configuration."""
     id_tag = str(quiz_set_id) if quiz_set_id is not None else "draft"
 
-    title_display = settings.title[:18] + "..." if settings.title and len(settings.title) > 18 else (settings.title or "None (Tap to set)")
-    desc_display = settings.description[:18] + "..." if settings.description and len(settings.description) > 18 else (settings.description or "None (Tap to set)")
+    title_display = (
+        settings.title[:18] + "..."
+        if settings.title and len(settings.title) > 18
+        else (settings.title or "None (Tap to set)")
+    )
+    desc_display = (
+        settings.description[:18] + "..."
+        if settings.description and len(settings.description) > 18
+        else (settings.description or "None (Tap to set)")
+    )
     timer_str = f"{settings.time_limit}s ⏱️" if settings.time_limit else "Off (No limit)"
     shuffle_str = "ON ✅" if settings.shuffle_options else "OFF ❌"
     anon_str = "ON (Anonymous) 🕶️" if settings.is_anonymous else "OFF (Public) 👤"
@@ -88,19 +128,45 @@ def get_quiz_settings_config_keyboard(settings: QuizSettings, quiz_set_id: int |
     done_btn = (
         InlineKeyboardButton("✅ Done / Back to Quiz", callback_data=f"view_quiz_{quiz_set_id}")
         if quiz_set_id is not None
-        else InlineKeyboardButton("✅ Save & Finish", callback_data="finish_creation_settings")
+        else InlineKeyboardButton(
+            "✅ Done / Back to Quiz", callback_data="finish_creation_settings"
+        )
     )
 
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🏷️ Title: {title_display}", callback_data=f"cfg_title_{id_tag}")],
-        [InlineKeyboardButton(f"📝 Description: {desc_display}", callback_data=f"cfg_desc_{id_tag}")],
-        [InlineKeyboardButton(f"⏱️ Timer: {timer_str}", callback_data=f"cfg_timer_{id_tag}")],
-        [InlineKeyboardButton(f"🔀 Shuffle Options: {shuffle_str}", callback_data=f"cfg_shuffle_{id_tag}")],
-        [InlineKeyboardButton(f"🕶️ Mode: {anon_str}", callback_data=f"cfg_anon_{id_tag}")],
-        [InlineKeyboardButton(f"💡 Explanations: {expl_str}", callback_data=f"cfg_expl_{id_tag}")],
-        [InlineKeyboardButton(f"📢 Header Banner: {banner_str}", callback_data=f"cfg_banner_{id_tag}")],
-        [InlineKeyboardButton(f"🎯 Destination: {dest_str}", callback_data=f"cfg_dest_{id_tag}")],
-        [done_btn],
-    ])
-
-
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    f"🏷️ Title: {title_display}", callback_data=f"cfg_title_{id_tag}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"📝 Description: {desc_display}", callback_data=f"cfg_desc_{id_tag}"
+                )
+            ],
+            [InlineKeyboardButton(f"⏱️ Timer: {timer_str}", callback_data=f"cfg_timer_{id_tag}")],
+            [
+                InlineKeyboardButton(
+                    f"🔀 Shuffle Options: {shuffle_str}", callback_data=f"cfg_shuffle_{id_tag}"
+                )
+            ],
+            [InlineKeyboardButton(f"🕶️ Mode: {anon_str}", callback_data=f"cfg_anon_{id_tag}")],
+            [
+                InlineKeyboardButton(
+                    f"💡 Explanations: {expl_str}", callback_data=f"cfg_expl_{id_tag}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"📢 Header Banner: {banner_str}", callback_data=f"cfg_banner_{id_tag}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"🎯 Destination: {dest_str}", callback_data=f"cfg_dest_{id_tag}"
+                )
+            ],
+            [done_btn],
+        ]
+    )

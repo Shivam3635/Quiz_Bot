@@ -1,8 +1,8 @@
 import html
-from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 from app.bot.keyboards.settings import get_quiz_settings_config_keyboard, get_settings_keyboard
@@ -16,7 +16,6 @@ from app.database.repositories import (
     update_quiz_set_settings,
 )
 from app.parser.models import QuizSettings
-from app.services.session_service import session_manager
 from app.services.telegram_service import TelegramService
 from app.utils.logger import setup_logger
 
@@ -27,13 +26,22 @@ TIMER_CYCLES = [None, 15, 30, 45, 60]
 CONFIG_TIMER_CYCLES = [None, 15, 30, 45, 60, 120]
 
 
-
 def format_settings_text(settings: QuizSettings) -> str:
     """Format settings review overview text."""
     title = f"<b>{settings.title}</b>" if settings.title else "<i>None (Untitled)</i>"
-    desc = f"<b>{settings.description}</b>" if settings.description else "<i>None (No description)</i>"
-    banner = "<b>ON</b> (Sends intro banner before polls)" if settings.header_banner_enabled else "<b>OFF</b>"
-    anon = "<b>ON</b> (Voter identities hidden)" if settings.is_anonymous else "<b>OFF</b> (Public voters)"
+    desc = (
+        f"<b>{settings.description}</b>" if settings.description else "<i>None (No description)</i>"
+    )
+    banner = (
+        "<b>ON</b> (Sends intro banner before polls)"
+        if settings.header_banner_enabled
+        else "<b>OFF</b>"
+    )
+    anon = (
+        "<b>ON</b> (Voter identities hidden)"
+        if settings.is_anonymous
+        else "<b>OFF</b> (Public voters)"
+    )
     shuffle = "<b>ON</b>" if settings.shuffle_options else "<b>OFF</b>"
     expl = "<b>ON</b>" if settings.explanation_enabled else "<b>OFF</b>"
     timer = f"<b>{settings.time_limit} seconds</b>" if settings.time_limit else "<b>No limit</b>"
@@ -54,6 +62,19 @@ def format_settings_text(settings: QuizSettings) -> str:
     )
 
 
+def _get_creation_settings_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, settings: QuizSettings
+) -> InlineKeyboardMarkup:
+    """Return settings keyboard with Done / Back to Quiz or Cancel depending on validity and persistence."""
+    saved_id = context.user_data.get("saved_quiz_set_id")
+    questions = context.user_data.get("bulk_questions") or []
+    from app.parser.validator import QuizValidator
+
+    val_res = QuizValidator().validate_batch(questions) if questions else None
+    is_valid = val_res.is_valid if val_res else True
+    return get_settings_keyboard(settings, quiz_set_id=saved_id, is_valid=is_valid)
+
+
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show the settings configuration screen."""
     query = update.callback_query
@@ -64,7 +85,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["quiz_settings"] = settings
 
     text = format_settings_text(settings)
-    keyboard = get_settings_keyboard(settings)
+    keyboard = _get_creation_settings_keyboard(context, settings)
 
     if query and query.message:
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
@@ -86,7 +107,7 @@ async def toggle_anonymous_callback(update: Update, context: ContextTypes.DEFAUL
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -104,7 +125,7 @@ async def toggle_shuffle_callback(update: Update, context: ContextTypes.DEFAULT_
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -122,7 +143,7 @@ async def toggle_explanation_callback(update: Update, context: ContextTypes.DEFA
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -148,7 +169,7 @@ async def cycle_timer_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if query.message:
             await query.edit_message_text(
                 format_settings_text(settings),
-                reply_markup=get_settings_keyboard(settings),
+                reply_markup=_get_creation_settings_keyboard(context, settings),
                 parse_mode=ParseMode.HTML,
             )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -166,7 +187,7 @@ async def toggle_header_banner_callback(update: Update, context: ContextTypes.DE
     if query and query.message:
         await query.edit_message_text(
             format_settings_text(settings),
-            reply_markup=get_settings_keyboard(settings),
+            reply_markup=_get_creation_settings_keyboard(context, settings),
             parse_mode=ParseMode.HTML,
         )
     return QuizCreationState.CONFIGURING_SETTINGS
@@ -181,7 +202,9 @@ async def prompt_set_title_callback(update: Update, context: ContextTypes.DEFAUL
         cancel_kb = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🔙 Back to Settings", callback_data="goto_settings")]]
         )
-        curr_title = f"<code>{settings.title}</code>" if settings.title else "<i>None (Untitled)</i>"
+        curr_title = (
+            f"<code>{settings.title}</code>" if settings.title else "<i>None (Untitled)</i>"
+        )
         await query.edit_message_text(
             "🏷️ <b>Configure Quiz Title</b>\n\n"
             f"Current title: {curr_title}\n\n"
@@ -205,7 +228,11 @@ async def prompt_set_desc_callback(update: Update, context: ContextTypes.DEFAULT
         cancel_kb = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🔙 Back to Settings", callback_data="goto_settings")]]
         )
-        curr_desc = f"<code>{settings.description}</code>" if settings.description else "<i>None (No description)</i>"
+        curr_desc = (
+            f"<code>{settings.description}</code>"
+            if settings.description
+            else "<i>None (No description)</i>"
+        )
         await query.edit_message_text(
             "📝 <b>Configure Quiz Description</b>\n\n"
             f"Current description: {curr_desc}\n\n"
@@ -257,7 +284,7 @@ async def receive_channel_dest_message(update: Update, context: ContextTypes.DEF
             msg = "🏷️ <b>Quiz title removed.</b>"
         else:
             settings.title = text[:150]
-            msg = f"🏷️ <b>Quiz Title Set:</b>\n\n<i>\"{html.escape(settings.title)}\"</i>"
+            msg = f'🏷️ <b>Quiz Title Set:</b>\n\n<i>"{html.escape(settings.title)}"</i>'
 
         context.user_data["quiz_settings"] = settings
         quiz_set_id = context.user_data.get("saved_quiz_set_id")
@@ -283,7 +310,7 @@ async def receive_channel_dest_message(update: Update, context: ContextTypes.DEF
             msg = "📝 <b>Quiz description removed.</b>"
         else:
             settings.description = text[:500]
-            msg = f"📝 <b>Quiz Description Set:</b>\n\n<i>\"{html.escape(settings.description)}\"</i>"
+            msg = f'📝 <b>Quiz Description Set:</b>\n\n<i>"{html.escape(settings.description)}"</i>'
 
         context.user_data["quiz_settings"] = settings
         quiz_set_id = context.user_data.get("saved_quiz_set_id")
@@ -345,12 +372,18 @@ async def receive_channel_dest_message(update: Update, context: ContextTypes.DEF
 def format_quiz_settings_text(settings: QuizSettings, q_count: int = 0) -> str:
     """Format comprehensive settings overview text."""
     title = f"<b>{html.escape(settings.title)}</b>" if settings.title else "<i>None (Untitled)</i>"
-    desc = f"<b>{html.escape(settings.description)}</b>" if settings.description else "<i>None (No description)</i>"
+    desc = (
+        f"<b>{html.escape(settings.description)}</b>"
+        if settings.description
+        else "<i>None (No description)</i>"
+    )
     banner = "<b>ON ✅</b>" if settings.header_banner_enabled else "<b>OFF ❌</b>"
     anon = "<b>ON (Anonymous) 🕶️</b>" if settings.is_anonymous else "<b>OFF (Public) 👤</b>"
     shuffle = "<b>ON ✅</b>" if settings.shuffle_options else "<b>OFF ❌</b>"
     expl = "<b>ON ✅</b>" if settings.explanation_enabled else "<b>OFF ❌</b>"
-    timer = f"<b>{settings.time_limit} seconds</b>" if settings.time_limit else "<b>No limit (Off)</b>"
+    timer = (
+        f"<b>{settings.time_limit} seconds</b>" if settings.time_limit else "<b>No limit (Off)</b>"
+    )
     dest = f"<b>{settings.channel_id}</b>" if settings.channel_id else "<b>This chat (Default)</b>"
 
     q_line = f"• 📊 Questions: <code>{q_count}</code>\n" if q_count > 0 else ""
@@ -409,7 +442,7 @@ async def config_toggle_callback(update: Update, context: ContextTypes.DEFAULT_T
     quiz_set_id = int(id_tag) if id_tag.isdigit() else context.user_data.get("saved_quiz_set_id")
     user_id = update.effective_user.id if update.effective_user else 0
 
-    settings: Optional[QuizSettings] = context.user_data.get("quiz_settings")
+    settings: QuizSettings | None = context.user_data.get("quiz_settings")
     q_count = len(context.user_data.get("bulk_questions", []))
 
     if not settings and quiz_set_id:
@@ -424,7 +457,9 @@ async def config_toggle_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     if setting_type == "timer":
         current_timer = settings.time_limit
-        idx = CONFIG_TIMER_CYCLES.index(current_timer) if current_timer in CONFIG_TIMER_CYCLES else -1
+        idx = (
+            CONFIG_TIMER_CYCLES.index(current_timer) if current_timer in CONFIG_TIMER_CYCLES else -1
+        )
         next_timer = CONFIG_TIMER_CYCLES[(idx + 1) % len(CONFIG_TIMER_CYCLES)]
         settings.time_limit = next_timer
         await query.answer(f"Timer: {next_timer}s" if next_timer else "Timer: Off")
@@ -509,7 +544,11 @@ async def config_title_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
     if not settings.title and quiz_set_id:
-        user_id = update.effective_user.id if update.effective_user and isinstance(update.effective_user.id, int) else 0
+        user_id = (
+            update.effective_user.id
+            if update.effective_user and isinstance(update.effective_user.id, int)
+            else 0
+        )
         with SessionLocal() as db:
             quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
             if quiz_set:
@@ -520,7 +559,11 @@ async def config_title_callback(update: Update, context: ContextTypes.DEFAULT_TY
     cancel_kb = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔙 Back to Settings", callback_data=cancel_cb)]]
     )
-    curr_title = f"<code>{html.escape(settings.title)}</code>" if settings.title else "<i>None (Untitled)</i>"
+    curr_title = (
+        f"<code>{html.escape(settings.title)}</code>"
+        if settings.title
+        else "<i>None (Untitled)</i>"
+    )
 
     if query and query.message:
         await query.edit_message_text(
@@ -551,7 +594,11 @@ async def config_desc_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
     if not settings.description and quiz_set_id:
-        user_id = update.effective_user.id if update.effective_user and isinstance(update.effective_user.id, int) else 0
+        user_id = (
+            update.effective_user.id
+            if update.effective_user and isinstance(update.effective_user.id, int)
+            else 0
+        )
         with SessionLocal() as db:
             quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
             if quiz_set:
@@ -562,7 +609,11 @@ async def config_desc_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     cancel_kb = InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔙 Back to Settings", callback_data=cancel_cb)]]
     )
-    curr_desc = f"<code>{html.escape(settings.description)}</code>" if settings.description else "<i>None (No description)</i>"
+    curr_desc = (
+        f"<code>{html.escape(settings.description)}</code>"
+        if settings.description
+        else "<i>None (No description)</i>"
+    )
 
     if query and query.message:
         await query.edit_message_text(
@@ -581,11 +632,17 @@ async def config_desc_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     return QuizCreationState.CONFIGURING_SETTINGS
 
 
-async def finish_creation_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def finish_creation_settings_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
     """Finish creation flow, persist any pending settings, clean up session, and display Quiz Card."""
     query = update.callback_query
+    msg = update.message
     if query:
-        await query.answer("Settings saved!")
+        try:
+            await query.answer()
+        except TelegramError as err:
+            logger.debug("Query answer already acknowledged: %s", err)
 
     quiz_set_id = context.user_data.get("saved_quiz_set_id")
     settings: QuizSettings = context.user_data.get("quiz_settings") or QuizSettings()
@@ -596,8 +653,24 @@ async def finish_creation_settings_callback(update: Update, context: ContextType
     chat_id = chat.id if chat else 0
 
     if not quiz_set_id and questions:
+        # Validate questions to ensure no remaining over-limit or broken questions
+        from app.parser.validator import QuizValidator
+
+        val_res = QuizValidator().validate_batch(questions)
+        if not val_res.is_valid:
+            warn_msg = f"⚠️ <b>Cannot finish quiz yet:</b> {val_res.error_count} question(s) still need attention."
+            if query:
+                await query.answer("Some questions still need attention!", show_alert=True)
+            elif msg:
+                await msg.reply_text(warn_msg, parse_mode=ParseMode.HTML)
+            from app.bot.handlers.preview import preview_callback
+
+            return await preview_callback(update, context)
+
         with SessionLocal() as db:
-            user_rec = get_or_create_user(db, telegram_id=user_id, username=user.username if user else None)
+            user_rec = get_or_create_user(
+                db, telegram_id=user_id, username=user.username if user else None
+            )
             quiz_set = save_quiz_batch(
                 db=db,
                 user_id=user_rec.id,
@@ -607,19 +680,61 @@ async def finish_creation_settings_callback(update: Update, context: ContextType
                 settings=settings,
             )
             quiz_set_id = quiz_set.id
+            context.user_data["saved_quiz_set_id"] = quiz_set_id
     elif quiz_set_id:
         with SessionLocal() as db:
             update_quiz_set_settings(db, quiz_set_id, settings)
 
     # Discard creation session from session_manager and clear user_data
     from app.bot.handlers.bulk import clear_creation_session
+
     clear_creation_session(context, user_id, chat_id)
 
     # Show Quiz Details Card
     from app.bot.handlers.myquizzes import view_quiz_callback
-    if quiz_set_id and query:
-        query.data = f"view_quiz_{quiz_set_id}"
-        await view_quiz_callback(update, context)
+
+    if quiz_set_id:
+        if query:
+            query.data = f"view_quiz_{quiz_set_id}"
+            await view_quiz_callback(update, context)
+        elif msg:
+            from app.bot.keyboards.myquizzes import get_quiz_details_keyboard
+
+            with SessionLocal() as db:
+                quiz_set = get_quiz_set_by_id(db, quiz_set_id=quiz_set_id, telegram_id=user_id)
+                if quiz_set:
+                    title = quiz_set.title
+                    desc = quiz_set.description or "None"
+                    created_str = (
+                        quiz_set.created_at.strftime("%Y-%m-%d %H:%M UTC")
+                        if quiz_set.created_at
+                        else "Unknown"
+                    )
+                    q_count = len(quiz_set.questions)
+                    rec = quiz_set.settings
+                    timer_str = f"{rec.time_limit}s" if rec and rec.time_limit else "No limit"
+                    mode_str = "Anonymous" if not rec or rec.is_anonymous else "Public"
+                    expl_str = "Enabled" if not rec or rec.explanation_enabled else "Disabled"
+                    target_str = rec.channel_id if rec and rec.channel_id else "This chat (Default)"
+                    last_published = "Never"
+
+                    details_text = (
+                        f"📊 <b>Quiz Details: {title}</b>\n\n"
+                        f"• <b>Description:</b> <i>{desc}</i>\n"
+                        f"• <b>Total Questions:</b> <code>{q_count}</code>\n"
+                        f"• <b>Created:</b> <code>{created_str}</code>\n"
+                        f"• <b>Last Published:</b> <code>{last_published}</code>\n"
+                        f"• <b>Target Destination:</b> <b>{target_str}</b>\n"
+                        f"• <b>Timer:</b> <code>{timer_str}</code>\n"
+                        f"• <b>Mode:</b> <code>{mode_str}</code>\n"
+                        f"• <b>Explanations:</b> <code>{expl_str}</code>\n\n"
+                        "<i>Select an action below:</i>"
+                    )
+                    bot_user = context.bot.username if context.bot else None
+                    await msg.reply_text(
+                        details_text,
+                        reply_markup=get_quiz_details_keyboard(quiz_set_id, bot_username=bot_user),
+                        parse_mode=ParseMode.HTML,
+                    )
 
     return ConversationHandler.END
-

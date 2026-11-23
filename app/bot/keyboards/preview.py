@@ -1,6 +1,7 @@
 """Keyboards for quiz preview pagination, editing, and confirmation."""
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from app.parser.models import QuizQuestion
 from app.parser.validator import telegram_utf16_length
 
@@ -16,16 +17,24 @@ def get_preview_keyboard(
 
     # Previous button (disabled or hidden on first page)
     if current_index > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"preview_nav_{current_index - 1}"))
+        nav_row.append(
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"preview_nav_{current_index - 1}")
+        )
     else:
         nav_row.append(InlineKeyboardButton("⏮️ (First)", callback_data="preview_noop"))
 
     # Page indicator
-    nav_row.append(InlineKeyboardButton(f"{current_index + 1} / {total_questions}", callback_data="preview_noop"))
+    nav_row.append(
+        InlineKeyboardButton(
+            f"{current_index + 1} / {total_questions}", callback_data="preview_noop"
+        )
+    )
 
     # Next button
     if current_index < total_questions - 1:
-        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"preview_nav_{current_index + 1}"))
+        nav_row.append(
+            InlineKeyboardButton("Next ➡️", callback_data=f"preview_nav_{current_index + 1}")
+        )
     else:
         nav_row.append(InlineKeyboardButton("⏭️ (Last)", callback_data="preview_noop"))
 
@@ -33,38 +42,68 @@ def get_preview_keyboard(
 
     # If there are invalid questions, provide a jump-to-issue button
     if invalid_indices:
-        keyboard.append([
-            InlineKeyboardButton(f"⚠️ Jump to Issue ({len(invalid_indices)} need attention)", callback_data="jump_next_invalid")
-        ])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"⚠️ Jump to Issue ({len(invalid_indices)} need attention)",
+                    callback_data="jump_next_invalid",
+                )
+            ]
+        )
+
+    bottom_btn = (
+        InlineKeyboardButton(
+            "✅ Done / Back to Quiz",
+            callback_data=(
+                f"view_quiz_{saved_quiz_set_id}"
+                if saved_quiz_set_id
+                else "finish_creation_settings"
+            ),
+        )
+        if not invalid_indices
+        else InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")
+    )
 
     if saved_quiz_set_id:
-        keyboard.extend([
+        keyboard.extend(
             [
-                InlineKeyboardButton("✏️ Edit This Question", callback_data="edit_current_question"),
-                InlineKeyboardButton("🗑️ Delete", callback_data="delete_current_question"),
-            ],
-            [
-                InlineKeyboardButton("⚙️ Quiz Settings", callback_data=f"edit_quiz_settings_{saved_quiz_set_id}"),
-                InlineKeyboardButton("🚀 Publish", callback_data=f"execute_republish_{saved_quiz_set_id}"),
-            ],
-            [
-                InlineKeyboardButton("🔙 Back to Quiz Details", callback_data=f"view_quiz_{saved_quiz_set_id}"),
-            ],
-        ])
+                [
+                    InlineKeyboardButton(
+                        "✏️ Edit This Question", callback_data="edit_current_question"
+                    ),
+                    InlineKeyboardButton("🗑️ Delete", callback_data="delete_current_question"),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⚙️ Quiz Settings", callback_data=f"edit_quiz_settings_{saved_quiz_set_id}"
+                    ),
+                    InlineKeyboardButton(
+                        "🚀 Publish", callback_data=f"execute_republish_{saved_quiz_set_id}"
+                    ),
+                ],
+                [
+                    bottom_btn,
+                ],
+            ]
+        )
     else:
-        keyboard.extend([
+        keyboard.extend(
             [
-                InlineKeyboardButton("✏️ Edit This Question", callback_data="edit_current_question"),
-                InlineKeyboardButton("🗑️ Delete", callback_data="delete_current_question"),
-            ],
-            [
-                InlineKeyboardButton("⚙️ Edit Settings", callback_data="goto_settings"),
-                InlineKeyboardButton("🚀 Publish All", callback_data="goto_confirm_publish"),
-            ],
-            [
-                InlineKeyboardButton("❌ Cancel", callback_data="action_cancel"),
-            ],
-        ])
+                [
+                    InlineKeyboardButton(
+                        "✏️ Edit This Question", callback_data="edit_current_question"
+                    ),
+                    InlineKeyboardButton("🗑️ Delete", callback_data="delete_current_question"),
+                ],
+                [
+                    InlineKeyboardButton("⚙️ Edit Settings", callback_data="goto_settings"),
+                    InlineKeyboardButton("🚀 Publish All", callback_data="goto_confirm_publish"),
+                ],
+                [
+                    bottom_btn,
+                ],
+            ]
+        )
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -105,7 +144,9 @@ def get_edit_question_keyboard(
 
     back_row = [InlineKeyboardButton("🔙 Back to Preview", callback_data="goto_preview")]
     if saved_quiz_set_id:
-        back_row.append(InlineKeyboardButton("💾 Quiz Details", callback_data=f"view_quiz_{saved_quiz_set_id}"))
+        back_row.append(
+            InlineKeyboardButton("💾 Quiz Details", callback_data=f"view_quiz_{saved_quiz_set_id}")
+        )
 
     keyboard = [
         [InlineKeyboardButton("👇 Tap to change Correct Answer:", callback_data="preview_noop")],
@@ -136,7 +177,9 @@ def get_publish_confirm_keyboard(total_questions: int) -> InlineKeyboardMarkup:
     """Generate confirmation keyboard before initiating bulk publishing."""
     keyboard = [
         [
-            InlineKeyboardButton(f"🚀 Publish {total_questions} Quizzes", callback_data="confirm_publish_now"),
+            InlineKeyboardButton(
+                f"🚀 Publish {total_questions} Quizzes", callback_data="confirm_publish_now"
+            ),
         ],
         [
             InlineKeyboardButton("👀 Back to Preview", callback_data="goto_preview"),
@@ -161,7 +204,9 @@ def get_retry_keyboard(
     rows = []
     if not has_uncertain:
         # Standard retry: all failures are confirmed rejections
-        rows.append([InlineKeyboardButton("🔄 Retry Failed Quizzes", callback_data="retry_failed_quizzes")])
+        rows.append(
+            [InlineKeyboardButton("🔄 Retry Failed Quizzes", callback_data="retry_failed_quizzes")]
+        )
     else:
         # Some or all failures have uncertain delivery outcomes (timeouts)
         if has_confirmed and confirmed_count > 0:
@@ -199,7 +244,12 @@ def get_uncertain_confirm_keyboard() -> InlineKeyboardMarkup:
     """Generate explicit warning confirmation keyboard for retrying uncertain deliveries."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("⚠️ Yes, I Checked (Proceed with Retry)", callback_data="confirm_retry_uncertain")],
+            [
+                InlineKeyboardButton(
+                    "⚠️ Yes, I Checked (Proceed with Retry)",
+                    callback_data="confirm_retry_uncertain",
+                )
+            ],
             [InlineKeyboardButton("🔙 Cancel / Back", callback_data="back_to_failed_summary")],
         ]
     )
