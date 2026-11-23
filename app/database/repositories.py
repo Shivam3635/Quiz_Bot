@@ -1,7 +1,7 @@
 """Repository functions for database interactions."""
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session, selectinload
 
 from app.database.models import (
@@ -10,6 +10,7 @@ from app.database.models import (
     Option,
     PublishJob,
     Question,
+    QuizSchedule,
     QuizSet,
     QuizSettingsRecord,
     User,
@@ -17,7 +18,7 @@ from app.database.models import (
 from app.parser.models import QuizQuestion, QuizSettings
 
 
-def get_or_create_user(db: Session, telegram_id: int, username: Optional[str] = None) -> User:
+def get_or_create_user(db: Session, telegram_id: int, username: str | None = None) -> User:
     """Find existing user or create a new user record."""
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
     if not user:
@@ -38,7 +39,7 @@ def save_quiz_batch(
     questions: list[QuizQuestion],
     settings: QuizSettings,
     title: str = "Bulk Quiz Batch",
-    description: Optional[str] = None,
+    description: str | None = None,
 ) -> QuizSet:
     """Persist a parsed quiz batch with settings into the database."""
     try:
@@ -109,7 +110,7 @@ def complete_publish_job(
         job.successful = successful
         job.failed = failed
         job.status = status
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         db.commit()
         db.refresh(job)
     return job
@@ -138,8 +139,8 @@ def get_user_quiz_sets(
 
 
 def get_quiz_set_by_id(
-    db: Session, quiz_set_id: int, telegram_id: Optional[int] = None
-) -> Optional[QuizSet]:
+    db: Session, quiz_set_id: int, telegram_id: int | None = None
+) -> QuizSet | None:
     """Retrieve a specific quiz set by ID, optionally verifying ownership."""
     query = (
         db.query(QuizSet)
@@ -202,8 +203,8 @@ def record_battle_result(
     db: Session,
     quiz_set_id: int,
     chat_id: str | int,
-    chat_title: Optional[str],
-    winner_name: Optional[str],
+    chat_title: str | None,
+    winner_name: str | None,
     winner_score: int,
     total_participants: int,
 ) -> BattleRecord:
@@ -222,9 +223,7 @@ def record_battle_result(
     return record
 
 
-def update_quiz_set_questions(
-    db: Session, quiz_set_id: int, questions: list[QuizQuestion]
-) -> None:
+def update_quiz_set_questions(db: Session, quiz_set_id: int, questions: list[QuizQuestion]) -> None:
     """Synchronize updated questions for an existing quiz set in the database."""
     try:
         quiz_set = (
@@ -266,7 +265,7 @@ def update_quiz_set_questions(
         raise
 
 
-def update_quiz_set_timer(db: Session, quiz_set_id: int, time_limit: Optional[int]) -> None:
+def update_quiz_set_timer(db: Session, quiz_set_id: int, time_limit: int | None) -> None:
     """Update time limit setting for a quiz set."""
     rec = db.query(QuizSettingsRecord).filter(QuizSettingsRecord.quiz_set_id == quiz_set_id).first()
     if rec:
@@ -282,7 +281,9 @@ def update_quiz_set_settings(db: Session, quiz_set_id: int, settings: QuizSettin
     if settings.title is not None:
         quiz_set.title = settings.title.strip() if settings.title.strip() else "Untitled Quiz Set"
     if settings.description is not None:
-        quiz_set.description = settings.description.strip() if settings.description.strip() else None
+        quiz_set.description = (
+            settings.description.strip() if settings.description.strip() else None
+        )
 
     rec = db.query(QuizSettingsRecord).filter(QuizSettingsRecord.quiz_set_id == quiz_set_id).first()
     if rec:
@@ -308,9 +309,9 @@ def record_group_member(
     db: Session,
     chat_id: int,
     user_id: int,
-    username: Optional[str] = None,
-    first_name: Optional[str] = None,
-) -> Optional[GroupMember]:
+    username: str | None = None,
+    first_name: str | None = None,
+) -> GroupMember | None:
     """Record or update an active group member for mass mentions."""
     try:
         member = (
@@ -324,7 +325,7 @@ def record_group_member(
             if first_name:
                 member.first_name = first_name
             member.is_active = True
-            member.last_seen = datetime.now(timezone.utc)
+            member.last_seen = datetime.now(UTC)
         else:
             member = GroupMember(
                 chat_id=chat_id,
@@ -337,7 +338,7 @@ def record_group_member(
         db.commit()
         db.refresh(member)
         return member
-    except Exception:
+    except Exception:  # noqa: BLE001
         db.rollback()
         return None
 
@@ -362,3 +363,291 @@ def deactivate_group_member(db: Session, chat_id: int, user_id: int) -> None:
     if member:
         member.is_active = False
         db.commit()
+
+
+# ============================================================================
+# Quiz Schedule Repository Functions (Phase 1: Single Quiz Scheduling)
+# ============================================================================
+
+
+def create_quiz_schedule(
+    db: Session,
+    user_id: int,
+    quiz_set_id: int,
+    chat_id: str | int,
+    scheduled_at: datetime,
+    timezone_str: str = "Asia/Kolkata",
+    chat_title: str | None = None,
+) -> QuizSchedule:
+    """Create a persistent schedule for an existing quiz owned by user_id."""
+    # Verify quiz existence and ownership
+    quiz = db.query(QuizSet).filter(QuizSet.id == quiz_set_id, QuizSet.user_id == user_id).first()
+    if not quiz:
+        raise ValueError(f"Quiz {quiz_set_id} not found or not owned by user {user_id}")
+
+    # Normalize scheduled_at to UTC
+    if scheduled_at.tzinfo is not None:
+        utc_dt = scheduled_at.astimezone(UTC).replace(tzinfo=None)
+    else:
+        utc_dt = scheduled_at
+
+    now_utc = datetime.now(UTC).replace(tzinfo=None)
+    if utc_dt <= now_utc:
+        raise ValueError("Scheduled time must be in the future")
+
+    schedule = QuizSchedule(
+        user_id=user_id,
+        quiz_set_id=quiz_set_id,
+        chat_id=str(chat_id),
+        chat_title=chat_title,
+        scheduled_at=utc_dt,
+        timezone=timezone_str,
+        status="pending",
+    )
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+    return schedule
+
+
+def get_quiz_schedule_by_id(
+    db: Session,
+    schedule_id: int,
+    user_id: int | None = None,
+) -> QuizSchedule | None:
+    """Retrieve a quiz schedule by ID with optional user authorization check."""
+    query = (
+        db.query(QuizSchedule)
+        .options(
+            selectinload(QuizSchedule.quiz_set).selectinload(QuizSet.questions),
+            selectinload(QuizSchedule.user),
+        )
+        .filter(QuizSchedule.id == schedule_id)
+    )
+    if user_id is not None:
+        query = query.filter(QuizSchedule.user_id == user_id)
+    return query.first()
+
+
+def get_user_quiz_schedules(
+    db: Session,
+    user_id: int,
+    status: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+) -> tuple[list[QuizSchedule], int]:
+    """Retrieve paginated schedules for a user with total count."""
+    query = (
+        db.query(QuizSchedule)
+        .options(
+            selectinload(QuizSchedule.quiz_set),
+            selectinload(QuizSchedule.user),
+        )
+        .filter(QuizSchedule.user_id == user_id)
+    )
+    if status:
+        query = query.filter(QuizSchedule.status == status)
+
+    total_count = query.count()
+    schedules = (
+        query.order_by(QuizSchedule.scheduled_at.desc(), QuizSchedule.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return schedules, total_count
+
+
+def cancel_quiz_schedule(
+    db: Session,
+    schedule_id: int,
+    user_id: int,
+) -> tuple[bool, str, QuizSchedule | None]:
+    """Cancel a pending schedule. Returns (success, message, schedule)."""
+    schedule = (
+        db.query(QuizSchedule)
+        .filter(QuizSchedule.id == schedule_id, QuizSchedule.user_id == user_id)
+        .first()
+    )
+    if not schedule:
+        return False, "Schedule not found or unauthorized.", None
+
+    if schedule.status != "pending":
+        return False, f"Cannot cancel schedule with status '{schedule.status}'.", schedule
+
+    schedule.status = "cancelled"
+    schedule.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+    db.refresh(schedule)
+    return True, "Schedule cancelled successfully.", schedule
+
+
+def claim_due_schedules(
+    db: Session,
+    now_utc: datetime,
+    batch_size: int = 5,
+    lease_token: str | None = None,
+) -> list[QuizSchedule]:
+    """
+    Atomically retrieve and lock due pending schedules.
+    Uses PostgreSQL FOR UPDATE SKIP LOCKED where available,
+    falling back to atomic conditional updates on SQLite.
+    """
+    if now_utc.tzinfo is not None:
+        normalized_now = now_utc.astimezone(UTC).replace(tzinfo=None)
+    else:
+        normalized_now = now_utc
+
+    is_sqlite = False
+    try:
+        bind = db.get_bind()
+        if bind and bind.dialect.name == "sqlite":
+            is_sqlite = True
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    if not is_sqlite:
+        # PostgreSQL / MySQL: row-level locking with SKIP LOCKED prevents contention
+        due_schedules = (
+            db.query(QuizSchedule)
+            .options(
+                selectinload(QuizSchedule.quiz_set).selectinload(QuizSet.questions),
+                selectinload(QuizSchedule.user),
+            )
+            .filter(
+                QuizSchedule.status == "pending",
+                QuizSchedule.scheduled_at <= normalized_now,
+            )
+            .order_by(QuizSchedule.scheduled_at.asc(), QuizSchedule.id.asc())
+            .with_for_update(skip_locked=True)
+            .limit(batch_size)
+            .all()
+        )
+        for s in due_schedules:
+            s.status = "running"
+            s.lease_token = lease_token
+            s.execution_started_at = normalized_now
+            s.last_heartbeat_at = normalized_now
+            s.updated_at = normalized_now
+        db.commit()
+        return due_schedules
+    else:
+        # SQLite fallback: atomic individual updates
+        candidates = (
+            db.query(QuizSchedule)
+            .options(
+                selectinload(QuizSchedule.quiz_set).selectinload(QuizSet.questions),
+                selectinload(QuizSchedule.user),
+            )
+            .filter(
+                QuizSchedule.status == "pending",
+                QuizSchedule.scheduled_at <= normalized_now,
+            )
+            .order_by(QuizSchedule.scheduled_at.asc(), QuizSchedule.id.asc())
+            .limit(batch_size)
+            .all()
+        )
+        claimed = []
+        for c in candidates:
+            rows = (
+                db.query(QuizSchedule)
+                .filter(QuizSchedule.id == c.id, QuizSchedule.status == "pending")
+                .update(
+                    {
+                        "status": "running",
+                        "lease_token": lease_token,
+                        "execution_started_at": normalized_now,
+                        "last_heartbeat_at": normalized_now,
+                        "updated_at": normalized_now,
+                    }
+                )
+            )
+            if rows > 0:
+                claimed.append(c)
+        db.commit()
+        return claimed
+
+
+def update_schedule_heartbeat(
+    db: Session,
+    schedule_id: int,
+    lease_token: str,
+) -> bool:
+    """Update execution heartbeat for an active lease."""
+    now_utc = datetime.now(UTC).replace(tzinfo=None)
+    rows = (
+        db.query(QuizSchedule)
+        .filter(
+            QuizSchedule.id == schedule_id,
+            QuizSchedule.lease_token == lease_token,
+            QuizSchedule.status == "running",
+        )
+        .update({"last_heartbeat_at": now_utc, "updated_at": now_utc})
+    )
+    db.commit()
+    return rows > 0
+
+
+def complete_quiz_schedule(
+    db: Session,
+    schedule_id: int,
+) -> QuizSchedule | None:
+    """Mark a schedule completed after successful quiz conduction."""
+    schedule = db.query(QuizSchedule).filter(QuizSchedule.id == schedule_id).first()
+    if schedule:
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        schedule.status = "completed"
+        schedule.executed_at = now_utc
+        schedule.updated_at = now_utc
+        db.commit()
+        db.refresh(schedule)
+    return schedule
+
+
+def fail_quiz_schedule(
+    db: Session,
+    schedule_id: int,
+    error_message: str,
+) -> QuizSchedule | None:
+    """Mark a schedule failed with error details."""
+    schedule = db.query(QuizSchedule).filter(QuizSchedule.id == schedule_id).first()
+    if schedule:
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        schedule.status = "failed"
+        schedule.error_message = error_message[:2000]
+        schedule.executed_at = now_utc
+        schedule.updated_at = now_utc
+        db.commit()
+        db.refresh(schedule)
+    return schedule
+
+
+def recover_stale_leases(
+    db: Session,
+    stale_before_utc: datetime,
+) -> list[QuizSchedule]:
+    """
+    Recover orphaned tasks whose workers crashed mid-execution.
+    To strictly prevent duplicate publishing, mark them failed with a crash notification.
+    """
+    if stale_before_utc.tzinfo is not None:
+        normalized_stale = stale_before_utc.astimezone(UTC).replace(tzinfo=None)
+    else:
+        normalized_stale = stale_before_utc
+
+    stale_schedules = (
+        db.query(QuizSchedule)
+        .filter(
+            QuizSchedule.status == "running",
+            QuizSchedule.last_heartbeat_at <= normalized_stale,
+        )
+        .all()
+    )
+    now_utc = datetime.now(UTC).replace(tzinfo=None)
+    for s in stale_schedules:
+        s.status = "failed"
+        s.error_message = "Worker lease expired after process crash or timeout."
+        s.executed_at = now_utc
+        s.updated_at = now_utc
+    db.commit()
+    return stale_schedules

@@ -1,13 +1,14 @@
 """SQLAlchemy ORM models for QuizBotPro."""
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+
 from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -19,7 +20,7 @@ from app.database.database import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -33,6 +34,9 @@ class User(Base):
     created_at = Column(DateTime, default=utcnow)
 
     quiz_sets = relationship("QuizSet", back_populates="user", cascade="all, delete-orphan")
+    quiz_schedules = relationship(
+        "QuizSchedule", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class QuizSet(Base):
@@ -48,10 +52,29 @@ class QuizSet(Base):
     created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="quiz_sets")
-    questions = relationship("Question", back_populates="quiz_set", cascade="all, delete-orphan", order_by="Question.position", lazy="selectin")
-    settings = relationship("QuizSettingsRecord", uselist=False, back_populates="quiz_set", cascade="all, delete-orphan", lazy="selectin")
-    publish_jobs = relationship("PublishJob", back_populates="quiz_set", cascade="all, delete-orphan", lazy="selectin")
-    battles = relationship("BattleRecord", back_populates="quiz_set", cascade="all, delete-orphan", lazy="selectin")
+    questions = relationship(
+        "Question",
+        back_populates="quiz_set",
+        cascade="all, delete-orphan",
+        order_by="Question.position",
+        lazy="selectin",
+    )
+    settings = relationship(
+        "QuizSettingsRecord",
+        uselist=False,
+        back_populates="quiz_set",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    publish_jobs = relationship(
+        "PublishJob", back_populates="quiz_set", cascade="all, delete-orphan", lazy="selectin"
+    )
+    battles = relationship(
+        "BattleRecord", back_populates="quiz_set", cascade="all, delete-orphan", lazy="selectin"
+    )
+    schedules = relationship(
+        "QuizSchedule", back_populates="quiz_set", cascade="all, delete-orphan", lazy="selectin"
+    )
 
 
 class Question(Base):
@@ -67,7 +90,13 @@ class Question(Base):
     position = Column(Integer, default=0)
 
     quiz_set = relationship("QuizSet", back_populates="questions")
-    options = relationship("Option", back_populates="question", cascade="all, delete-orphan", order_by="Option.position", lazy="selectin")
+    options = relationship(
+        "Option",
+        back_populates="question",
+        cascade="all, delete-orphan",
+        order_by="Option.position",
+        lazy="selectin",
+    )
 
 
 class Option(Base):
@@ -146,8 +175,33 @@ class GroupMember(Base):
     last_seen = Column(DateTime, default=utcnow, onupdate=utcnow)
     is_active = Column(Boolean, default=True)
 
-    __table_args__ = (
-        UniqueConstraint("chat_id", "user_id", name="uq_group_member"),
-    )
+    __table_args__ = (UniqueConstraint("chat_id", "user_id", name="uq_group_member"),)
 
 
+class QuizSchedule(Base):
+    """A scheduled automated conduction of a quiz set to a target Telegram channel/group."""
+
+    __tablename__ = "quiz_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    quiz_set_id = Column(Integer, ForeignKey("quiz_sets.id"), nullable=False, index=True)
+    chat_id = Column(String(255), nullable=False, index=True)
+    chat_title = Column(String(255), nullable=True)
+    scheduled_at = Column(DateTime, nullable=False, index=True)  # UTC timestamp
+    timezone = Column(String(64), default="Asia/Kolkata", nullable=False)
+    status = Column(
+        String(32), default="pending", index=True, nullable=False
+    )  # pending, running, completed, failed, cancelled
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    execution_started_at = Column(DateTime, nullable=True)
+    executed_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+    lease_token = Column(String(64), nullable=True)
+    last_heartbeat_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="quiz_schedules")
+    quiz_set = relationship("QuizSet", back_populates="schedules")
+
+    __table_args__ = (Index("ix_quiz_schedules_status_scheduled_at", "status", "scheduled_at"),)

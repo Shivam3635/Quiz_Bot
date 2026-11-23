@@ -1,17 +1,18 @@
 """Test module imports, configuration, and app initialization."""
 
-import pytest
+from app.bot.keyboards.main import get_cancel_keyboard, get_main_menu_keyboard
+from app.bot.states import QuizCreationState
 from app.config.settings import Settings, get_settings
 from app.main import create_bot_app
-from app.bot.states import QuizCreationState
-from app.bot.keyboards.main import get_main_menu_keyboard, get_cancel_keyboard
 
 
 def test_settings_load():
     """Verify that settings can load and have expected defaults."""
     settings = get_settings()
     assert isinstance(settings, Settings)
-    assert settings.DATABASE_URL.startswith("sqlite") or settings.DATABASE_URL.startswith("postgresql")
+    assert settings.DATABASE_URL.startswith("sqlite") or settings.DATABASE_URL.startswith(
+        "postgresql"
+    )
     assert settings.MIN_OPTIONS_PER_QUESTION == 2
     assert settings.MAX_OPTIONS_PER_QUESTION == 10
 
@@ -19,10 +20,15 @@ def test_settings_load():
 def test_keyboards():
     """Verify keyboard structures."""
     main_menu = get_main_menu_keyboard()
-    assert len(main_menu.inline_keyboard) == 3
+    assert len(main_menu.inline_keyboard) == 4
     # Check that Create Quiz button is in the first row
     assert main_menu.inline_keyboard[0][0].text == "✍️ Create Quiz"
     assert main_menu.inline_keyboard[0][0].callback_data == "action_bulk_create"
+    assert any(
+        btn.callback_data == "action_automation_menu"
+        for row in main_menu.inline_keyboard
+        for btn in row
+    )
 
     cancel = get_cancel_keyboard()
     assert len(cancel.inline_keyboard) == 1

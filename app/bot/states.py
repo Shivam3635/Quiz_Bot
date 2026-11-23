@@ -15,3 +15,14 @@ class QuizCreationState(IntEnum):
     CONFIRMING_PUBLISH = auto()
     PUBLISHING = auto()
     EDITING_QUESTION = auto()
+
+
+class QuizScheduleState(IntEnum):
+    """Conversation states during single quiz scheduling flow."""
+
+    SELECTING_QUIZ = auto()
+    SELECTING_GROUP = auto()
+    SELECTING_DATE = auto()
+    SELECTING_TIME = auto()
+    SELECTING_TIMEZONE = auto()
+    CONFIRMING_SCHEDULE = auto()

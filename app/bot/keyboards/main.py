@@ -13,6 +13,9 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📚 My Quizzes", callback_data="action_saved_sets"),
         ],
         [
+            InlineKeyboardButton("⏰ Quiz Automation", callback_data="action_automation_menu"),
+        ],
+        [
             InlineKeyboardButton("❓ Help", callback_data="action_help"),
         ],
     ]
@@ -21,7 +24,5 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def get_cancel_keyboard() -> InlineKeyboardMarkup:
     """Return inline keyboard markup with a single Cancel button."""
-    keyboard = [
-        [InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]
-    ]
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]]
     return InlineKeyboardMarkup(keyboard)

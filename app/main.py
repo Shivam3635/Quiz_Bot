@@ -26,9 +26,13 @@ from telegram.ext import (
 )
 
 from app.bot.handlers import (
+    automation_menu_callback,
     back_to_failed_summary_callback,
     cancel_game_callback,
     cancel_quiz_creation,
+    cancel_schedule_by_id_callback,
+    cancel_schedule_flow_callback,
+    cancel_schedule_menu_callback,
     coming_soon_callback,
     config_desc_callback,
     config_dest_callback,
@@ -39,6 +43,7 @@ from app.bot.handlers import (
     confirm_delete_quiz_callback,
     confirm_publish_callback,
     confirm_retry_uncertain_callback,
+    confirm_schedule_callback,
     continue_session_callback,
     creation_timer_callback,
     cycle_timer_callback,
@@ -68,30 +73,50 @@ from app.bot.handlers import (
     multipart_done_callback,
     my_quizzes_command,
     my_quizzes_page_callback,
+    my_schedules_callback,
     myquizzes_noop_callback,
+    pick_date_callback,
+    pick_group_callback,
+    pick_quiz_callback,
+    pick_time_callback,
     preview_callback,
     preview_noop_callback,
     preview_saved_quiz_callback,
     prompt_channel_dest_callback,
+    prompt_date_selection,
     prompt_edit_explanation_callback,
     prompt_edit_option_callback,
     prompt_edit_question_text_callback,
+    prompt_group_selection,
     prompt_set_desc_callback,
     prompt_set_title_callback,
+    prompt_time_selection,
+    prompt_timezone_selection_callback,
+    prompt_type_date_callback,
+    prompt_type_group_callback,
+    prompt_type_time_callback,
+    prompt_type_timezone_callback,
     receive_channel_dest_message,
+    receive_date_text_message,
+    receive_group_text_message,
     receive_question_edit_message,
     receive_quiz_desc_message,
     receive_quiz_document_message,
     receive_quiz_part_message,
     receive_quiz_title_message,
     receive_republish_dest_message,
+    receive_time_text_message,
+    receive_timezone_text_message,
     replay_game_callback,
     republish_change_dest_callback,
     republish_confirm_callback,
     retry_confirmed_callback,
     retry_failed_callback,
     retry_with_uncertain_prompt_callback,
+    sched_noop_callback,
+    schedule_quiz_page_callback,
     set_correct_answer_callback,
+    set_timezone_callback,
     settings_callback,
     show_copyable_question_callback,
     skip_quiz_desc_callback,
@@ -100,6 +125,8 @@ from app.bot.handlers import (
     start_game_callback,
     start_publishing_callback,
     start_quiz_session_flow,
+    start_schedule_flow,
+    start_schedule_from_quiz,
     startquiz_command,
     stop_mention_command,
     stopquiz_command,
@@ -111,11 +138,12 @@ from app.bot.handlers import (
     toggle_shuffle_callback,
     track_group_member_message,
     view_quiz_callback,
+    view_schedule_details_callback,
 )
 from app.bot.middleware import staging_security_gatekeeper
 from app.bot.monitored_request import MonitoredHTTPXRequest
 from app.bot.polling_tracker import reset_polling_tracker
-from app.bot.states import QuizCreationState
+from app.bot.states import QuizCreationState, QuizScheduleState
 from app.config.settings import get_settings
 from app.database.database import DatabaseIdentityError, init_db
 from app.readiness import (
@@ -125,6 +153,7 @@ from app.readiness import (
     set_application_lifecycle_ready,
     set_application_ready,
 )
+from app.services.scheduler_service import QuizSchedulerService
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -172,6 +201,8 @@ async def post_init(application: Application) -> None:
         BotCommand("start", "Open main menu"),
         BotCommand("newquiz", "Create a new bulk quiz"),
         BotCommand("myquizzes", "View saved quizzes & 1-click re-publish"),
+        BotCommand("schedule", "Schedule a quiz for automated publishing"),
+        BotCommand("automation", "Open Quiz Automation Engine menu"),
         BotCommand("startquiz", "Launch a live group quiz battle"),
         BotCommand("stopquiz", "Stop active group quiz battle"),
         BotCommand("all", "Tag/notify all members about quiz (@MentionBot)"),
@@ -220,9 +251,26 @@ async def post_init(application: Application) -> None:
     # Schedule background verification to mark readiness True once event loop & updater are running
     asyncio.create_task(_wait_for_application_running(application))
 
+    # Start Quiz Scheduler Service for Phase 1 background execution
+    try:
+        scheduler = QuizSchedulerService(bot=application.bot)
+        application.bot_data["scheduler_service"] = scheduler
+        scheduler.start()
+        logger.info("Quiz Scheduler Service started successfully.")
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to start Quiz Scheduler Service: %s", e)
+
 
 async def post_stop(application: Application) -> None:
     """Lifecycle hook invoked when Application stops."""
+    scheduler = application.bot_data.get("scheduler_service")
+    if scheduler:
+        try:
+            await scheduler.stop()
+            logger.info("Quiz Scheduler Service stopped.")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Error stopping Quiz Scheduler Service: %s", e)
+
     set_application_lifecycle_ready(False, reason="application_stopped")
     reset_polling_tracker()
     logger.info("Application stopped: readiness set to FALSE.")
@@ -230,6 +278,13 @@ async def post_stop(application: Application) -> None:
 
 async def post_shutdown(application: Application) -> None:
     """Lifecycle hook invoked when Application completes shutdown."""
+    scheduler = application.bot_data.get("scheduler_service")
+    if scheduler:
+        try:
+            await scheduler.stop()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
     set_application_lifecycle_ready(False, reason="application_shutdown")
     reset_polling_tracker()
     logger.info("Application shut down: readiness set to FALSE.")
@@ -406,6 +461,93 @@ def create_bot_app() -> Application:
     )
 
     application.add_handler(bulk_conv_handler)
+
+    # Phase 1: Single Quiz Scheduling Conversation Flow
+    schedule_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(start_schedule_flow, pattern="^action_schedule_start$"),
+            CallbackQueryHandler(start_schedule_from_quiz, pattern="^sched_from_quiz_\\d+$"),
+            CommandHandler(["schedule", "autoschedule"], start_schedule_flow),
+        ],
+        states={
+            QuizScheduleState.SELECTING_QUIZ: [
+                CallbackQueryHandler(schedule_quiz_page_callback, pattern="^sched_quiz_page_\\d+$"),
+                CallbackQueryHandler(pick_quiz_callback, pattern="^sched_pick_quiz_\\d+$"),
+                CallbackQueryHandler(sched_noop_callback, pattern="^sched_noop$"),
+            ],
+            QuizScheduleState.SELECTING_GROUP: [
+                CallbackQueryHandler(pick_group_callback, pattern="^sched_group_.+$"),
+                CallbackQueryHandler(prompt_type_group_callback, pattern="^sched_type_group$"),
+                CallbackQueryHandler(prompt_group_selection, pattern="^sched_back_to_group$"),
+                CallbackQueryHandler(start_schedule_flow, pattern="^sched_back_to_quiz$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_group_text_message),
+            ],
+            QuizScheduleState.SELECTING_DATE: [
+                CallbackQueryHandler(pick_date_callback, pattern="^sched_date_.+$"),
+                CallbackQueryHandler(prompt_type_date_callback, pattern="^sched_type_date$"),
+                CallbackQueryHandler(prompt_date_selection, pattern="^sched_back_to_date$"),
+                CallbackQueryHandler(prompt_group_selection, pattern="^sched_back_to_group$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_date_text_message),
+            ],
+            QuizScheduleState.SELECTING_TIME: [
+                CallbackQueryHandler(pick_time_callback, pattern="^sched_time_.+$"),
+                CallbackQueryHandler(prompt_type_time_callback, pattern="^sched_type_time$"),
+                CallbackQueryHandler(
+                    prompt_timezone_selection_callback, pattern="^sched_select_tz$"
+                ),
+                CallbackQueryHandler(prompt_time_selection, pattern="^sched_back_to_time$"),
+                CallbackQueryHandler(prompt_date_selection, pattern="^sched_back_to_date$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_time_text_message),
+            ],
+            QuizScheduleState.SELECTING_TIMEZONE: [
+                CallbackQueryHandler(set_timezone_callback, pattern="^sched_set_tz_.+$"),
+                CallbackQueryHandler(prompt_type_timezone_callback, pattern="^sched_type_tz$"),
+                CallbackQueryHandler(prompt_time_selection, pattern="^sched_back_to_time$"),
+                CallbackQueryHandler(
+                    prompt_timezone_selection_callback, pattern="^sched_select_tz$"
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_timezone_text_message),
+            ],
+            QuizScheduleState.CONFIRMING_SCHEDULE: [
+                CallbackQueryHandler(confirm_schedule_callback, pattern="^sched_confirm_schedule$"),
+                CallbackQueryHandler(prompt_group_selection, pattern="^sched_back_to_group$"),
+                CallbackQueryHandler(prompt_date_selection, pattern="^sched_back_to_date$"),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_schedule_flow_callback, pattern="^action_cancel_schedule$"),
+            CommandHandler("cancel", cancel_schedule_flow_callback),
+            CommandHandler(["start", "startgroup"], start_command),
+        ],
+        per_user=True,
+        per_chat=True,
+        per_message=False,
+    )
+    application.add_handler(schedule_conv_handler)
+
+    # Phase 1: Schedule management & menu handlers
+    application.add_handler(
+        CommandHandler(["automation", "schedule_menu"], automation_menu_callback)
+    )
+    application.add_handler(
+        CallbackQueryHandler(automation_menu_callback, pattern="^action_automation_menu$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(my_schedules_callback, pattern="^action_my_schedules_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(my_schedules_callback, pattern="^my_sched_page_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(view_schedule_details_callback, pattern="^view_schedule_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(cancel_schedule_by_id_callback, pattern="^sched_cancel_id_\\d+$")
+    )
+    application.add_handler(
+        CallbackQueryHandler(cancel_schedule_menu_callback, pattern="^action_cancel_schedule_menu$")
+    )
+    application.add_handler(CallbackQueryHandler(sched_noop_callback, pattern="^sched_noop$"))
 
     # Standard command handlers
     application.add_handler(CommandHandler(["start", "startgroup"], start_command))
