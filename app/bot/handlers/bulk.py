@@ -204,7 +204,10 @@ async def receive_quiz_desc_message(update: Update, context: ContextTypes.DEFAUL
     session = session_manager.create_session(user_id, chat_id)
     context.user_data["active_session_id"] = session.session_id
 
-    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel, CSV, Word, or PDF document)."
+    prompt_text = (
+        "👍 Good! Now send your quiz questions in <b>text format</b>.\n\n"
+        "<i>Tip: You can paste your questions directly into this chat.</i>"
+    )
     await update.message.reply_text(
         prompt_text,
         parse_mode=ParseMode.HTML,
@@ -228,7 +231,10 @@ async def skip_quiz_desc_callback(update: Update, context: ContextTypes.DEFAULT_
     session = session_manager.create_session(user_id, chat_id)
     context.user_data["active_session_id"] = session.session_id
 
-    prompt_text = "👍 Good! Now send your quiz questions (or upload an Excel, CSV, Word, or PDF document)."
+    prompt_text = (
+        "👍 Good! Now send your quiz questions in <b>text format</b>.\n\n"
+        "<i>Tip: You can paste your questions directly into this chat.</i>"
+    )
     if query and query.message:
         await query.edit_message_text(
             prompt_text,
@@ -316,7 +322,9 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
     # Check if user is responding to fix a specific broken question
     fixing_q_num = context.user_data.get("fixing_question_number")
     if fixing_q_num is not None:
-        valid_questions: list[QuizQuestion] = context.user_data.setdefault("parsed_valid_questions", [])
+        valid_questions: list[QuizQuestion] = context.user_data.setdefault(
+            "parsed_valid_questions", []
+        )
         parsed = fast_parser.parse(raw_text)
         if parsed.has_errors or not parsed.questions:
             first_err = parsed.errors[0] if parsed.errors else None
@@ -392,7 +400,9 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
             if q.raw_prefix:
                 q.raw_prefix = f"Q{idx}."
 
-        validation_result = quiz_service.validator.validate_batch(valid_questions, allow_extended_options=True)
+        validation_result = quiz_service.validator.validate_batch(
+            valid_questions, allow_extended_options=True
+        )
         if not validation_result.is_valid:
             session.status = "PREVIEW"
             settings = context.user_data.get("quiz_settings") or QuizSettings()
@@ -408,7 +418,9 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
                 "💡 <i>You can fix these questions right now using the in-app editor,\n"
                 "drop the invalid ones, or send additional parts:</i>"
             )
-            report = validation_result.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
+            report = validation_result.get_formatted_error_report(
+                max_display=4, custom_footer=custom_footer
+            )
             unique_failed = len(validation_result.failed_question_indices)
             msg_text = (
                 f"❌ <b>Validation Notice</b>\n\n"
@@ -454,7 +466,10 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
                 )
                 saved_quiz_set_id = quiz_set.id
                 context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
-                logger.info("Successfully persisted quiz set %d after in-line question fix", saved_quiz_set_id)
+                logger.info(
+                    "Successfully persisted quiz set %d after in-line question fix",
+                    saved_quiz_set_id,
+                )
         except Exception as db_err:
             logger.exception("Failed to save quiz batch after fix: %s", db_err)
 
@@ -505,7 +520,9 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
     prev_msg_id = context.user_data.get("last_part_status_msg_id")
     if prev_msg_id and update.effective_chat:
         try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=prev_msg_id)
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id, message_id=prev_msg_id
+            )
         except Exception:
             pass
 
@@ -519,7 +536,7 @@ async def receive_quiz_part_message(update: Update, context: ContextTypes.DEFAUL
 
 
 async def receive_quiz_document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle incoming document or photo uploads (Excel, CSV, Word, PDF, Images, ZIP) during quiz creation."""
+    """Handle incoming document or photo uploads during quiz creation with a polite soft-gate."""
     if not update.message or (not update.message.document and not update.message.photo):
         return QuizCreationState.WAITING_FOR_BULK_INPUT
 
@@ -532,99 +549,10 @@ async def receive_quiz_document_message(update: Update, context: ContextTypes.DE
         session = session_manager.create_session(user_id, chat_id)
         context.user_data["active_session_id"] = session.session_id
 
-    # Check lock
-    if session.is_processing_lock or session.status == "PROCESSING":
-        await update.message.reply_text(
-            "⏳ <i>Your quiz is currently being processed. Please wait for the current operation to finish.</i>",
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    # Extract target file
-    is_photo = bool(update.message.photo)
-    if is_photo:
-        photo = update.message.photo[-1]  # Highest resolution
-        filename = f"photo_{photo.file_unique_id}.jpg"
-        file_size = photo.file_size or 0
-    else:
-        doc = update.message.document
-        filename = doc.file_name or "document"
-        file_size = doc.file_size or 0
-
-    # File size validation (20MB)
-    MAX_FILE_BYTES = 20 * 1024 * 1024
-    if file_size > MAX_FILE_BYTES:
-        await update.message.reply_text(
-            f"⚠️ <b>File too large:</b> {html.escape(filename)} is {file_size // (1024 * 1024)}MB.\n"
-            "Telegram Bot API supports files up to 20MB. Please upload a smaller file.",
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    status_msg = await update.message.reply_text(
-        f"⏳ <b>Processing file:</b> <code>{html.escape(filename)}</code>\n\n"
-        "<i>Downloading and parsing quiz questions...</i>",
-        parse_mode=ParseMode.HTML,
-    )
-
-    try:
-        tg_file = await (update.message.photo[-1].get_file() if is_photo else update.message.document.get_file())
-        file_bytes = await tg_file.download_as_bytearray()
-        summary = await document_router.ingest_async(bytes(file_bytes), filename=filename)
-    except Exception as exc:
-        logger.exception("Error ingesting file %s: %s", filename, exc)
-        await status_msg.edit_text(
-            f"❌ <b>Processing error:</b> Failed to process <code>{html.escape(filename)}</code> ({str(exc)}).\n\n"
-            "Please check the file and try again.",
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    if not summary.success or summary.total_detected == 0:
-        err_text = summary.error_message or "No valid quiz questions could be detected in this file."
-        await status_msg.edit_text(
-            f"⚠️ <b>Notice for</b> <code>{html.escape(filename)}</code>:\n\n"
-            f"{html.escape(err_text)}\n\n"
-            "<i>Supported: Excel (.xlsx), CSV (.csv), Word (.docx), PDF (.pdf), Images, and ZIP archives.</i>",
-            reply_markup=get_multipart_input_keyboard(),
-            parse_mode=ParseMode.HTML,
-        )
-        return QuizCreationState.WAITING_FOR_BULK_INPUT
-
-    # Append part to session
-    part = session.add_part(summary.raw_text, detected_questions=summary.total_detected)
-    logger.info(
-        "User %s uploaded %s '%s' (Part %d, %d detected questions, %d chars). Total parts: %d",
-        user_id,
-        summary.file_type,
-        filename,
-        part.part_number,
-        part.detected_questions,
-        part.character_count,
-        session.total_parts,
-    )
-
-    badge_map = {
-        "excel": "📊 <b>Excel Spreadsheet</b>",
-        "csv": "📑 <b>CSV Spreadsheet</b>",
-        "word": "📝 <b>Word Document</b>",
-        "pdf": "📄 <b>PDF Document</b>",
-        "image": "🖼️ <b>Image / OCR</b>",
-        "zip": "📦 <b>ZIP Archive</b>",
-        "text": "📄 <b>Text Document</b>",
-    }
-    badge = badge_map.get(summary.file_type, "📄 <b>Document</b>")
-
-    success_text = (
-        f"{badge} Processed: <code>{html.escape(filename)}</code>\n\n"
-        f"• Questions detected: <b>{summary.total_detected}</b>\n"
-        f"• Total session questions: <b>{session.total_questions_detected}</b>\n"
-        f"• Total parts combined: <b>{session.total_parts}</b>\n\n"
-        "<i>Send another file or message with questions, or tap ✅ Done below to finish creating your quiz:</i>"
-    )
-
-    await status_msg.edit_text(
-        success_text,
+    await update.message.reply_text(
+        "⚠️ <b>Document & Photo uploads are temporarily disabled.</b>\n\n"
+        "Currently, only direct <b>text messages</b> are supported for quiz creation.\n"
+        "Please copy and paste your questions directly as text into this chat.",
         reply_markup=get_multipart_input_keyboard(),
         parse_mode=ParseMode.HTML,
     )
@@ -776,7 +704,9 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
             "💡 <i>You can fix these questions right now using the in-app editor,\n"
             "drop the invalid ones, or send additional parts:</i>"
         )
-        report = result.validation.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
+        report = result.validation.get_formatted_error_report(
+            max_display=4, custom_footer=custom_footer
+        )
 
         unique_failed = len(result.validation.failed_question_indices)
         msg_text = (
@@ -815,7 +745,9 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
     saved_quiz_set_id = None
     try:
         with SessionLocal() as db:
-            user_rec = get_or_create_user(db, telegram_id=user_id, username=user.username if user else None)
+            user_rec = get_or_create_user(
+                db, telegram_id=user_id, username=user.username if user else None
+            )
             quiz_set = save_quiz_batch(
                 db=db,
                 user_id=user_rec.id,
@@ -826,7 +758,9 @@ async def multipart_done_callback(update: Update, context: ContextTypes.DEFAULT_
             )
             saved_quiz_set_id = quiz_set.id
             context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
-            logger.info("Successfully persisted quiz set %d for user %d", saved_quiz_set_id, user_id)
+            logger.info(
+                "Successfully persisted quiz set %d for user %d", saved_quiz_set_id, user_id
+            )
     except Exception as db_err:
         logger.exception("Failed to save quiz batch for user %s: %s", user_id, db_err)
         session.status = "WAITING_FOR_INPUT"
@@ -922,7 +856,9 @@ async def drop_broken_question_callback(update: Update, context: ContextTypes.DE
         if q.raw_prefix:
             q.raw_prefix = f"Q{idx}."
 
-    validation_result = quiz_service.validator.validate_batch(valid_questions, allow_extended_options=True)
+    validation_result = quiz_service.validator.validate_batch(
+        valid_questions, allow_extended_options=True
+    )
     user_id = update.effective_user.id if update.effective_user else 0
     chat_id = update.effective_chat.id if update.effective_chat else 0
     session = session_manager.get_active_session(user_id, chat_id)
@@ -944,7 +880,9 @@ async def drop_broken_question_callback(update: Update, context: ContextTypes.DE
             "💡 <i>You can fix these questions right now using the in-app editor,\n"
             "drop the invalid ones, or send additional parts:</i>"
         )
-        report = validation_result.get_formatted_error_report(max_display=4, custom_footer=custom_footer)
+        report = validation_result.get_formatted_error_report(
+            max_display=4, custom_footer=custom_footer
+        )
         unique_failed = len(validation_result.failed_question_indices)
         msg_text = (
             f"❌ <b>Validation Notice</b>\n\n"
@@ -992,7 +930,10 @@ async def drop_broken_question_callback(update: Update, context: ContextTypes.DE
             )
             saved_quiz_set_id = quiz_set.id
             context.user_data["saved_quiz_set_id"] = saved_quiz_set_id
-            logger.info("Successfully persisted quiz set %d after dropping broken question", saved_quiz_set_id)
+            logger.info(
+                "Successfully persisted quiz set %d after dropping broken question",
+                saved_quiz_set_id,
+            )
     except Exception as db_err:
         logger.exception("Failed to save quiz batch after drop: %s", db_err)
 
@@ -1058,8 +999,14 @@ async def creation_timer_callback(update: Update, context: ContextTypes.DEFAULT_
 
     from app.bot.keyboards.myquizzes import get_quiz_details_keyboard
 
-    title_display = f"<b>{html.escape(settings.title)}</b>" if settings.title else "<i>Untitled Quiz</i>"
-    desc_display = f"\n• <b>Description:</b> <i>{html.escape(settings.description)}</i>" if settings.description else ""
+    title_display = (
+        f"<b>{html.escape(settings.title)}</b>" if settings.title else "<i>Untitled Quiz</i>"
+    )
+    desc_display = (
+        f"\n• <b>Description:</b> <i>{html.escape(settings.description)}</i>"
+        if settings.description
+        else ""
+    )
     timer_str = f"{settings.time_limit}s" if settings.time_limit else "No limit"
     target_str = settings.channel_id if settings.channel_id else "This chat (Default)"
 
